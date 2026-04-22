@@ -48,9 +48,10 @@
             <span>Bender profile</span>
             <select id="benderProfile"></select>
           </label>
-          <label>
-            <span>Bend type</span>
-            <select id="bendType" required>
+          <div class="bend-type-block">
+            <span class="control-label">Bend type</span>
+            <div id="bendTypeButtons" class="bend-type-grid" role="tablist" aria-label="Bend type buttons"></div>
+            <select id="bendType" required class="visually-hidden">
               <option value="stub90">90° stub-up</option>
               <option value="offset">Offset bend</option>
               <option value="backToBack90">Back-to-back 90</option>
@@ -58,7 +59,7 @@
               <option value="saddle4">4-point saddle</option>
               <option value="kick">Kick bend</option>
             </select>
-          </label>
+          </div>
         </div>
 
         <div class="grid two compact-row">
@@ -90,7 +91,7 @@
       <h2>Result</h2>
       <p class="section-subtitle">Marks, bend spacing, and plain-English instructions update after each calculation.</p>
       <div id="resultSummary" class="result-summary empty">Enter values and calculate. The result panel will show marks and instructions rounded to the nearest 1/16 inch.</div>
-      <canvas id="diagramCanvas" width="900" height="420" aria-label="Bend diagram"></canvas>
+      <canvas id="diagramCanvas" width="1200" height="600" aria-label="Bend diagram"></canvas>
     </section>
 
     <section class="panel data-panel">

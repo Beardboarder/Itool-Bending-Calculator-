@@ -1183,6 +1183,7 @@ const el = {
   conduitSize: document.getElementById('conduitSize'),
   benderProfile: document.getElementById('benderProfile'),
   bendType: document.getElementById('bendType'),
+  bendTypeButtons: document.getElementById('bendTypeButtons'),
   referenceEnd: document.getElementById('referenceEnd'),
   dynamicFields: document.getElementById('dynamicFields'),
   messages: document.getElementById('messages'),
@@ -1200,9 +1201,10 @@ function cloneData(value) {
 }
 
 function initializeApp() {
-  state.data = loadSavedData() || cloneData(DEFAULT_DATA);
+  state.data = stripUnsupportedSizes(loadSavedData() || cloneData(DEFAULT_DATA));
   syncDataEditor();
   populateConduitTypes();
+  renderBendTypeButtons();
   attachEvents();
   renderDynamicFields();
   drawPlaceholder();
@@ -1221,13 +1223,61 @@ function attachEvents() {
   });
 
   el.benderProfile.addEventListener('change', renderDynamicFields);
-  el.bendType.addEventListener('change', renderDynamicFields);
+  el.bendType.addEventListener('change', function () {
+    renderBendTypeButtons();
+    renderDynamicFields();
+  });
   el.referenceEnd.addEventListener('change', renderDynamicFields);
+
+  if (el.bendTypeButtons) {
+    el.bendTypeButtons.addEventListener('click', function (event) {
+      const button = event.target.closest('[data-bend-type]');
+      if (!button) return;
+      el.bendType.value = button.dataset.bendType;
+      renderBendTypeButtons();
+      renderDynamicFields();
+    });
+  }
+
+  el.dynamicFields.addEventListener('click', function (event) {
+    const angleButton = event.target.closest('[data-angle-target]');
+    if (angleButton) {
+      const hidden = document.getElementById(angleButton.dataset.angleTarget);
+      if (hidden) hidden.value = angleButton.dataset.angleValue;
+      const custom = document.getElementById(angleButton.dataset.angleTarget + 'Custom');
+      if (custom) custom.value = '';
+      syncDynamicUi();
+      return;
+    }
+  });
+
+  el.dynamicFields.addEventListener('input', function (event) {
+    if (!event || !event.target) return;
+    if (event.target.type === 'range') {
+      updateSliderDisplay(event.target);
+      return;
+    }
+    if (event.target.id && event.target.id.endsWith('Custom')) {
+      const hidden = document.getElementById(event.target.id.replace(/Custom$/, ''));
+      if (hidden && event.target.value) {
+        hidden.value = event.target.value;
+        syncDynamicUi();
+      }
+    }
+  });
 
   el.dynamicFields.addEventListener('change', function (event) {
     if (!event || !event.target) return;
     if (event.target.id === 'btbSecondMeasure') {
       renderDynamicFields();
+      return;
+    }
+    if (event.target.id && event.target.id.endsWith('Custom')) {
+      const hidden = document.getElementById(event.target.id.replace(/Custom$/, ''));
+      if (hidden && event.target.value) {
+        hidden.value = event.target.value;
+        syncDynamicUi();
+      }
     }
   });
 
@@ -1243,12 +1293,22 @@ function attachEvents() {
   document.getElementById('saveDataBtn').addEventListener('click', saveDataEditor);
   document.getElementById('loadSavedBtn').addEventListener('click', loadSavedIntoEditor);
   document.getElementById('loadDefaultsBtn').addEventListener('click', function () {
-    state.data = cloneData(DEFAULT_DATA);
+    state.data = stripUnsupportedSizes(cloneData(DEFAULT_DATA));
     syncDataEditor();
     populateConduitTypes();
     renderDynamicFields();
     addMessage('info', 'Loaded editable default conduit/bender data into the editor.');
   });
+}
+
+function stripUnsupportedSizes(data) {
+  const cleaned = cloneData(data);
+  Object.keys(cleaned.conduitTypes || {}).forEach(function (type) {
+    if (cleaned.conduitTypes[type] && cleaned.conduitTypes[type].sizes) {
+      delete cleaned.conduitTypes[type].sizes['1/2"'];
+    }
+  });
+  return cleaned;
 }
 
 function populateConduitTypes() {
@@ -1295,6 +1355,65 @@ function populateProfiles() {
   }
 }
 
+function renderBendTypeButtons() {
+  if (!el.bendTypeButtons) return;
+  const icons = {
+    stub90: '└',
+    backToBack90: '∩',
+    offset: '╱',
+    saddle3: '∧',
+    saddle4: '⌒',
+    kick: '⤴'
+  };
+  el.bendTypeButtons.innerHTML = Object.keys(BEND_LABELS).map(function (key) {
+    const active = key === el.bendType.value ? ' active' : '';
+    return '<button type="button" class="bend-card' + active + '" data-bend-type="' + key + '"><span class="bend-icon">' + (icons[key] || '•') + '</span><span class="bend-label">' + escapeHtml(BEND_LABELS[key]) + '</span></button>';
+  }).join('');
+}
+
+function sliderFieldHtml(id, label, options) {
+  const min = options.min || 0;
+  const max = options.max || 120;
+  const step = options.step || 0.0625;
+  const value = options.value !== undefined ? options.value : min;
+  const display = options.display || toNearestSixteenth(Number(value));
+  const unit = options.unit || 'in';
+  return '<label class="slider-field"><span class="slider-top"><span>' + escapeHtml(label) + '</span><strong data-slider-display-for="' + id + '">' + escapeHtml(display) + '</strong></span><input id="' + id + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '" data-unit="' + unit + '"><span class="slider-minmax"><span>' + escapeHtml(toNearestSixteenth(min)) + '</span><span>' + escapeHtml(toNearestSixteenth(max)) + '</span></span></label>';
+}
+
+function angleButtonsHtml(id, label, active, values, allowCustom) {
+  active = active === undefined || active === null || active === '' ? values[0] : active;
+  const buttons = values.map(function (value) {
+    const activeClass = String(value) === String(active) ? ' active' : '';
+    return '<button type="button" class="angle-chip' + activeClass + '" data-angle-target="' + id + '" data-angle-value="' + value + '">' + value + '°</button>';
+  }).join('');
+  const customInput = allowCustom ? '<label><span>Custom angle (optional)</span><input id="' + id + 'Custom" type="number" min="1" max="89" step="0.5" placeholder="Tap a preset or enter custom"></label>' : '';
+  return '<div class="dynamic-stack"><div><span class="control-label">' + escapeHtml(label) + '</span><div class="angle-button-group">' + buttons + '</div><input id="' + id + '" type="hidden" value="' + active + '"></div>' + customInput + '</div>';
+}
+
+function updateSliderDisplay(input) {
+  if (!input || input.type !== 'range') return;
+  const target = el.dynamicFields.querySelector('[data-slider-display-for="' + input.id + '"]');
+  if (!target) return;
+  target.textContent = input.dataset.unit === 'deg' ? fmtAngle(Number(input.value)) : toNearestSixteenth(Number(input.value));
+}
+
+function syncDynamicUi() {
+  const ranges = el.dynamicFields.querySelectorAll('input[type="range"]');
+  for (let i = 0; i < ranges.length; i += 1) updateSliderDisplay(ranges[i]);
+  const groups = el.dynamicFields.querySelectorAll('[data-angle-target]');
+  for (let i = 0; i < groups.length; i += 1) {
+    const button = groups[i];
+    const targetId = button.dataset.angleTarget;
+    const hidden = document.getElementById(targetId);
+    button.classList.toggle('active', hidden && String(hidden.value) === String(button.dataset.angleValue));
+  }
+  const cards = el.bendTypeButtons ? el.bendTypeButtons.querySelectorAll('[data-bend-type]') : [];
+  for (let i = 0; i < cards.length; i += 1) {
+    cards[i].classList.toggle('active', cards[i].dataset.bendType === el.bendType.value);
+  }
+}
+
 function captureDynamicValues() {
   const values = {};
   const nodes = el.dynamicFields.querySelectorAll('input, select, textarea');
@@ -1323,112 +1442,80 @@ function renderDynamicFields() {
   const html = {
     stub90: [
       '<h3>90° stub-up inputs</h3>',
-      '<p class="inline-note">The bend mark is calculated directly from the selected reference end (' + escapeHtml(selectedReference) + ').</p>',
-      '<div class="grid two">',
-      '<label><span>Desired stub length from ' + escapeHtml(selectedReference) + ' (inches)</span><input id="stubLength" type="number" min="0" step="0.01" placeholder="e.g. 24"></label>',
-      '<label><span>Take-up value override (optional inches)</span><input id="takeUpOverride" type="number" min="0" step="0.01" placeholder="Uses selected profile by default"></label>',
+      '<p class="inline-note prominent">Set the finished stub length from ' + escapeHtml(selectedReference) + '.</p>',
+      '<div class="dynamic-stack">',
+      sliderFieldHtml('stubLength', 'Stub height from ' + selectedReference, { min: 0, max: 120, value: saved.stubLength || 24 }),
+      '<label><span>Take-up value override (optional inches)</span><input id="takeUpOverride" type="number" min="0" step="0.0625" placeholder="Uses selected profile by default" value="' + escapeHtml(saved.takeUpOverride || '') + '"></label>',
       '</div>'
     ].join(''),
 
     offset: [
-      '<h3>Offset bend inputs</h3>',
-      '<p class="inline-note">Enter the distance to where the offset should start from ' + escapeHtml(selectedReference) + '.</p>',
-      '<div class="grid two">',
-      '<label><span>Distance to start of offset from ' + escapeHtml(selectedReference) + ' (inches)</span><input id="offsetReferenceDistance" type="number" min="0" step="0.01" placeholder="e.g. 18"></label>',
-      '<label><span>Desired offset height (inches)</span><input id="offsetHeight" type="number" min="0" step="0.01" placeholder="e.g. 6"></label>',
-      '</div>',
-      '<div class="grid two">',
-      '<label><span>Offset bend angle</span>',
-      '<select id="offsetAnglePreset">',
-      ANGLE_PRESETS.map(function (value) {
-        return '<option value="' + value + '">' + (value === 'custom' ? 'Custom angle' : value + '°') + '</option>';
-      }).join(''),
-      '</select></label>',
-      '<label><span>Custom angle (degrees, if selected)</span><input id="offsetCustomAngle" type="number" min="1" max="89" step="0.01" placeholder="e.g. 35"></label>',
-      '</div>',
-      '<div class="grid two">',
-      '<label><span>Optional shrink override (inches)</span><input id="offsetShrinkOverride" type="number" min="0" step="0.01" placeholder="Geometry used by default"></label>',
-      '<div class="hint-card"><strong>Offset note:</strong> spacing uses universal geometry; take-up and radius stay configurable in the profile.</div>',
+      '<h3>Offset / rolling offset inputs</h3>',
+      '<p class="inline-note prominent">Use the sliders for object location and height. Tap a bend-angle button instead of a dropdown.</p>',
+      '<div class="dynamic-stack">',
+      sliderFieldHtml('offsetReferenceDistance', 'Distance to object / start point from ' + selectedReference, { min: 0, max: 120, value: saved.offsetReferenceDistance || 24 }),
+      sliderFieldHtml('offsetHeight', 'Offset height', { min: 0, max: 36, value: saved.offsetHeight || 6 }),
+      angleButtonsHtml('offsetAnglePreset', 'Angle of bends', saved.offsetAnglePreset || 30, [10, 22.5, 30, 45, 60], true),
+      '<label><span>Optional shrink override (inches)</span><input id="offsetShrinkOverride" type="number" min="0" step="0.0625" placeholder="Geometry used by default" value="' + escapeHtml(saved.offsetShrinkOverride || '') + '"></label>',
+      '<div class="hint-card"><strong>Offset note:</strong> spacing uses universal geometry; profile data still controls take-up, radius, and ITool B2 values.</div>',
       '</div>'
     ].join(''),
 
     backToBack90: [
       '<h3>Back-to-back 90 inputs</h3>',
-      '<p class="inline-note">Set the first 90 from ' + escapeHtml(selectedReference) + '. Then choose how you want to lay out the second 90.</p>',
-      '<div class="grid two">',
-      '<label><span>First stub length from ' + escapeHtml(selectedReference) + ' (inches)</span><input id="firstStubLength" type="number" min="0" step="0.01" placeholder="e.g. 20"></label>',
-      '<label><span>Second 90 defined by</span>',
-      '<select id="btbSecondMeasure">',
-      '<option value="spacing">Bend-to-bend distance</option>',
-      '<option value="oppositeStub">Second stub from ' + escapeHtml(oppositeReference) + '</option>',
-      '</select></label>',
-      '</div>',
-      '<div class="grid two">',
-      btbMode === 'oppositeStub'
-        ? '<label><span>Second stub length from ' + escapeHtml(oppositeReference) + ' (inches)</span><input id="secondStubLength" type="number" min="0" step="0.01" placeholder="e.g. 18"></label>'
-        : '<label><span>Distance between bends (inches)</span><input id="distanceBetween90s" type="number" min="0" step="0.01" placeholder="e.g. 36"></label>',
-      '<label><span>Take-up value override (optional inches)</span><input id="btbTakeUpOverride" type="number" min="0" step="0.01" placeholder="Uses selected profile by default"></label>',
-      '</div>',
-      btbMode === 'oppositeStub'
-        ? '<div class="hint-card"><strong>Second 90:</strong> mark the second bend from ' + escapeHtml(oppositeReference) + ' using the same take-up. Gain is not applied in opposite-end stub mode.</div>'
-        : '<div class="grid two"><label><span>Gain value override (optional inches)</span><input id="btbGainOverride" type="number" min="0" step="0.01" placeholder="Uses selected profile by default"></label><div class="hint-card"><strong>Spacing mode:</strong> the second mark is corrected by gain so the finished bend-to-bend distance stays on target.</div></div>'
+      '<p class="inline-note prominent">Set the first stub, then choose how the second 90 is defined.</p>',
+      '<div class="dynamic-stack">',
+      sliderFieldHtml('firstStubLength', 'First stub from ' + selectedReference, { min: 0, max: 120, value: saved.firstStubLength || 20 }),
+      '<label><span>Second 90 defined by</span><select id="btbSecondMeasure"><option value="spacing"' + (btbMode === 'spacing' ? ' selected' : '') + '>Bend-to-bend distance</option><option value="oppositeStub"' + (btbMode === 'oppositeStub' ? ' selected' : '') + '>Second stub from ' + escapeHtml(oppositeReference) + '</option></select></label>',
+      (btbMode === 'oppositeStub'
+        ? sliderFieldHtml('secondStubLength', 'Second stub from ' + oppositeReference, { min: 0, max: 120, value: saved.secondStubLength || 18 })
+        : sliderFieldHtml('distanceBetween90s', 'Distance between bends', { min: 0, max: 120, value: saved.distanceBetween90s || 36 })),
+      '<label><span>Take-up value override (optional inches)</span><input id="btbTakeUpOverride" type="number" min="0" step="0.0625" placeholder="Uses selected profile by default" value="' + escapeHtml(saved.btbTakeUpOverride || '') + '"></label>',
+      (btbMode === 'oppositeStub'
+        ? '<div class="hint-card"><strong>Second 90:</strong> measured from ' + escapeHtml(oppositeReference) + ' using the same take-up.</div>'
+        : '<label><span>Gain value override (optional inches)</span><input id="btbGainOverride" type="number" min="0" step="0.0625" placeholder="Uses selected profile by default" value="' + escapeHtml(saved.btbGainOverride || '') + '"></label>'),
+      '</div>'
     ].join(''),
 
     saddle3: [
       '<h3>3-point saddle inputs</h3>',
-      '<p class="inline-note">Use the obstruction centerline measurement from ' + escapeHtml(selectedReference) + '.</p>',
-      '<div class="grid two">',
-      '<label><span>Distance to obstruction centerline from ' + escapeHtml(selectedReference) + ' (inches)</span><input id="s3CenterlineDistance" type="number" min="0" step="0.01" placeholder="e.g. 36"></label>',
-      '<label><span>Obstruction height (inches)</span><input id="s3Height" type="number" min="0" step="0.01" placeholder="e.g. 4"></label>',
-      '</div>',
-      '<div class="grid two">',
-      '<label><span>Obstruction width (inches)</span><input id="s3Width" type="number" min="0" step="0.01" placeholder="e.g. 6"></label>',
-      '<label><span>Center angle (degrees)</span><input id="s3CenterAngle" type="number" min="1" max="89" step="0.01" value="45"></label>',
-      '</div>',
-      '<div class="grid two">',
-      '<label><span>Side angle (degrees)</span><input id="s3SideAngle" type="number" min="1" max="89" step="0.01" value="22.5"></label>',
+      '<p class="inline-note prominent">Set the obstruction centerline, height, and width. Angle buttons drive the bend setup.</p>',
+      '<div class="dynamic-stack">',
+      sliderFieldHtml('s3CenterlineDistance', 'Distance to obstruction centerline from ' + selectedReference, { min: 0, max: 120, value: saved.s3CenterlineDistance || 36 }),
+      '<div class="field-inline-grid">' + sliderFieldHtml('s3Height', 'Obstruction height', { min: 0, max: 24, value: saved.s3Height || 4 }) + sliderFieldHtml('s3Width', 'Obstruction width', { min: 0, max: 36, value: saved.s3Width || 6 }) + '</div>',
+      angleButtonsHtml('s3CenterAngle', 'Center angle', saved.s3CenterAngle || 45, [22.5, 30, 45, 60], true),
+      angleButtonsHtml('s3SideAngle', 'Side angle', saved.s3SideAngle || 22.5, [10, 15, 22.5, 30], true),
       '<div class="hint-card"><strong>Typical setup:</strong> center angle is often about twice the side angle.</div>',
       '</div>'
     ].join(''),
 
     saddle4: [
       '<h3>4-point saddle inputs</h3>',
-      '<p class="inline-note">Use the distance to the near edge of the obstruction from ' + escapeHtml(selectedReference) + '.</p>',
-      '<div class="grid two">',
-      '<label><span>Distance to near edge of obstruction from ' + escapeHtml(selectedReference) + ' (inches)</span><input id="s4NearEdgeDistance" type="number" min="0" step="0.01" placeholder="e.g. 24"></label>',
-      '<label><span>Obstruction height (inches)</span><input id="s4Height" type="number" min="0" step="0.01" placeholder="e.g. 4"></label>',
-      '</div>',
-      '<div class="grid two">',
-      '<label><span>Obstruction width (inches)</span><input id="s4Width" type="number" min="0" step="0.01" placeholder="e.g. 8"></label>',
-      '<label><span>Chosen angle (degrees)</span><input id="s4Angle" type="number" min="1" max="89" step="0.01" value="30"></label>',
-      '</div>',
-      '<div class="grid two">',
-      '<label><span>Optional shrink override (inches)</span><input id="s4ShrinkOverride" type="number" min="0" step="0.01" placeholder="Geometry used by default"></label>',
-      '<div class="hint-card"><strong>4-point note:</strong> the app treats the saddle as two equal offsets separated by the flat width.</div>',
+      '<p class="inline-note prominent">Set the near edge, obstruction height, and width. Tap a bend-angle button below.</p>',
+      '<div class="dynamic-stack">',
+      sliderFieldHtml('s4NearEdgeDistance', 'Distance to near edge from ' + selectedReference, { min: 0, max: 120, value: saved.s4NearEdgeDistance || 24 }),
+      '<div class="field-inline-grid">' + sliderFieldHtml('s4Height', 'Obstruction height', { min: 0, max: 24, value: saved.s4Height || 4 }) + sliderFieldHtml('s4Width', 'Obstruction width', { min: 0, max: 36, value: saved.s4Width || 8 }) + '</div>',
+      angleButtonsHtml('s4Angle', 'Angle of bends', saved.s4Angle || 30, [10, 22.5, 30, 45, 60], true),
+      '<label><span>Optional shrink override (inches)</span><input id="s4ShrinkOverride" type="number" min="0" step="0.0625" placeholder="Geometry used by default" value="' + escapeHtml(saved.s4ShrinkOverride || '') + '"></label>',
       '</div>'
     ].join(''),
 
     kick: [
       '<h3>Kick bend inputs</h3>',
-      '<p class="inline-note">Distance to bend is measured from ' + escapeHtml(selectedReference) + '.</p>',
-      '<div class="grid two">',
-      '<label><span>Kick angle (degrees)</span><input id="kickAngle" type="number" min="1" max="89" step="0.01" value="15"></label>',
-      '<label><span>Rise (inches)</span><input id="kickRise" type="number" min="0" step="0.01" placeholder="e.g. 3"></label>',
-      '</div>',
-      '<div class="grid two">',
-      '<label><span>Distance to bend / tangent point from ' + escapeHtml(selectedReference) + ' (inches)</span><input id="kickDistanceToBend" type="number" min="0" step="0.01" placeholder="e.g. 20"></label>',
-      '<label><span>Optional gain override (inches)</span><input id="kickGainOverride" type="number" min="0" step="0.01" placeholder="Uses selected profile by default"></label>',
+      '<p class="inline-note prominent">Set the rise and distance to bend, then tap a bend-angle button.</p>',
+      '<div class="dynamic-stack">',
+      angleButtonsHtml('kickAngle', 'Kick angle', saved.kickAngle || 15, [10, 15, 22.5, 30, 45, 60], true),
+      '<div class="field-inline-grid">' + sliderFieldHtml('kickRise', 'Rise', { min: 0, max: 24, value: saved.kickRise || 3 }) + sliderFieldHtml('kickDistanceToBend', 'Distance to bend / tangent point from ' + selectedReference, { min: 0, max: 120, value: saved.kickDistanceToBend || 20 }) + '</div>',
+      '<label><span>Optional gain override (inches)</span><input id="kickGainOverride" type="number" min="0" step="0.0625" placeholder="Uses selected profile by default" value="' + escapeHtml(saved.kickGainOverride || '') + '"></label>',
       '</div>'
     ].join('')
   };
 
   el.dynamicFields.innerHTML = html[bendType] || '';
   restoreDynamicValues(saved);
-
   const activeBtb = document.getElementById('btbSecondMeasure');
-  if (activeBtb && !activeBtb.value) {
-    activeBtb.value = 'spacing';
-  }
+  if (activeBtb && !activeBtb.value) activeBtb.value = 'spacing';
+  syncDynamicUi();
 }
 
 function calculateAndRender() {
@@ -1601,9 +1688,7 @@ function calculateStub90(common, cfg) {
 function calculateOffset(common, cfg) {
   const referenceDistance = parseRequired('offsetReferenceDistance', 'Distance to start of offset');
   const offsetHeight = parseRequired('offsetHeight', 'Offset height');
-  const preset = document.getElementById('offsetAnglePreset').value;
-  const customAngle = parseOptional('offsetCustomAngle');
-  const angle = preset === 'custom' ? customAngle : Number(preset);
+  const angle = parseRequired('offsetAnglePreset', 'Offset angle');
   const shrinkOverride = parseOptional('offsetShrinkOverride');
   const errors = [];
   const warnings = [];
@@ -2426,7 +2511,7 @@ function syncDataEditor() {
 
 function saveDataEditor() {
   try {
-    const parsed = JSON.parse(el.dataEditor.value);
+    const parsed = stripUnsupportedSizes(JSON.parse(el.dataEditor.value));
     validateDataShape(parsed);
     state.data = parsed;
     localStorage.setItem('conduitBenderData', JSON.stringify(parsed));
@@ -2444,7 +2529,7 @@ function loadSavedData() {
     if (!raw) {
       return null;
     }
-    const parsed = JSON.parse(raw);
+    const parsed = stripUnsupportedSizes(JSON.parse(raw));
     validateDataShape(parsed);
     return parsed;
   } catch (error) {
