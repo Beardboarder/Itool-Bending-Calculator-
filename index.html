@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Conduit Bending Calculator - ITool B2</title>
+  <title>iTool Bending Calculator - ITool B2</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body data-theme="light">
   <header class="app-header">
     <div class="header-left-tools">
       <div class="view-mode-toggle" role="group" aria-label="Layout mode">
@@ -14,20 +14,19 @@
         <button id="mobileModeBtn" class="secondary mode-btn" type="button" data-view-mode="mobile" aria-pressed="false">Mobile</button>
       </div>
     </div>
+
     <div class="brand-block">
       <div class="eyebrow-row">
         <span class="eyebrow-pill">ITool B2-ready</span>
         <span class="eyebrow-pill soft">120 in stock conduit</span>
         <span class="eyebrow-pill soft">Nearest 1/16&quot; output</span>
       </div>
-      <h1>Conduit Bending Calculator</h1>
-      <p class="subtitle">A polished local bending calculator with editable bender data, fixed 10-foot stock length, and field-friendly diagrams.</p>
+      <h1>iTool Bending Calculator</h1>
+      <p class="subtitle">A polished local bending calculator with a fixed 10-foot stock length, locked ITool-style profiles, and field-friendly bend diagrams.</p>
     </div>
+
     <div class="header-actions">
-      <button id="settingsBtn" class="secondary settings-btn" type="button" aria-expanded="false" aria-controls="dataPanel">Settings</button>
-      <button id="printBtn" class="secondary" type="button">Print</button>
-      <button id="copyBtn" class="secondary" type="button">Copy Result</button>
-      <button id="resetBtn" class="danger" type="button">Reset</button>
+      <button id="darkModeBtn" class="secondary" type="button" aria-pressed="false">Dark Mode</button>
     </div>
   </header>
 
@@ -51,10 +50,12 @@
         </div>
 
         <div class="grid two">
-          <label>
-            <span>Bender profile</span>
-            <select id="benderProfile"></select>
-          </label>
+          <div class="profile-card" aria-live="polite">
+            <span class="output-mode-label">Bender profile</span>
+            <strong id="profileNameDisplay">ITool B2 Bender</strong>
+            <span class="small">Built-in profile locked for consistent field use.</span>
+          </div>
+
           <div class="bend-type-block">
             <span class="control-label">Bend type</span>
             <div id="bendTypeButtons" class="bend-type-grid" role="tablist" aria-label="Bend type buttons"></div>
@@ -99,18 +100,6 @@
       <p class="section-subtitle">Marks, bend spacing, and plain-English instructions update after each calculation.</p>
       <div id="resultSummary" class="result-summary empty">Enter values and calculate. The result panel will show marks and instructions rounded to the nearest 1/16 inch.</div>
       <canvas id="diagramCanvas" width="1200" height="600" aria-label="Bend diagram"></canvas>
-    </section>
-
-    <section class="panel data-panel is-collapsed" id="dataPanel" hidden>
-      <h2>Editable conduit / bender data</h2>
-      <p class="section-subtitle">Profiles stay editable so take-up, gain, radius, and special field notes can match your actual bender.</p>
-      <p class="note">Values such as take-up, gain, hook marks, bend radius, and offsets are editable. Verify them against your actual bender chart before field use.</p>
-      <div class="data-actions">
-        <button id="loadDefaultsBtn" class="secondary" type="button">Load defaults</button>
-        <button id="saveDataBtn" class="primary" type="button">Save to localStorage</button>
-        <button id="loadSavedBtn" class="secondary" type="button">Load saved</button>
-      </div>
-      <textarea id="dataEditor" spellcheck="false"></textarea>
     </section>
   </main>
 
