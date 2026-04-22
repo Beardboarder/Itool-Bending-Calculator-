@@ -1161,7 +1161,7 @@ const DEFAULT_DATA = {
   }
 };
 
-const ANGLE_PRESETS = [10, 22.5, 30, 45, 60, 'custom'];
+const ANGLE_PRESETS = [10, 15, 22.5, 30, 45, 60, 'custom'];
 const BEND_LABELS = {
   stub90: '90° stub-up',
   offset: 'Offset bend',
@@ -1175,13 +1175,14 @@ const STOCK_LENGTH_INCHES = 120;
 
 const state = {
   data: null,
-  lastResult: null
+  lastResult: null,
+  lastCommon: null,
+  lastSelection: null
 };
 
 const el = {
   conduitType: document.getElementById('conduitType'),
   conduitSize: document.getElementById('conduitSize'),
-  benderProfile: document.getElementById('benderProfile'),
   bendType: document.getElementById('bendType'),
   bendTypeButtons: document.getElementById('bendTypeButtons'),
   referenceEnd: document.getElementById('referenceEnd'),
@@ -1189,49 +1190,47 @@ const el = {
   messages: document.getElementById('messages'),
   resultSummary: document.getElementById('resultSummary'),
   diagramCanvas: document.getElementById('diagramCanvas'),
-  dataEditor: document.getElementById('dataEditor'),
   calculatorForm: document.getElementById('calculatorForm'),
-  dataPanel: document.getElementById('dataPanel'),
-  settingsBtn: document.getElementById('settingsBtn'),
   desktopModeBtn: document.getElementById('desktopModeBtn'),
-  mobileModeBtn: document.getElementById('mobileModeBtn')
+  mobileModeBtn: document.getElementById('mobileModeBtn'),
+  darkModeBtn: document.getElementById('darkModeBtn'),
+  profileNameDisplay: document.getElementById('profileNameDisplay')
 };
 
 function cloneData(value) {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(value);
-  }
+  if (typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
 }
 
 function initializeApp() {
-  state.data = stripUnsupportedSizes(loadSavedData() || cloneData(DEFAULT_DATA));
-  syncDataEditor();
+  state.data = stripUnsupportedSizes(cloneData(DEFAULT_DATA));
   populateConduitTypes();
   renderBendTypeButtons();
   attachEvents();
   renderDynamicFields();
   applyViewMode(loadViewMode());
+  applyTheme(loadTheme());
+  updateProfileDisplay();
   drawPlaceholder();
 }
 
 function attachEvents() {
   el.conduitType.addEventListener('change', function () {
     populateSizes();
-    populateProfiles();
+    updateProfileDisplay();
     renderDynamicFields();
   });
 
   el.conduitSize.addEventListener('change', function () {
-    populateProfiles();
+    updateProfileDisplay();
     renderDynamicFields();
   });
 
-  el.benderProfile.addEventListener('change', renderDynamicFields);
   el.bendType.addEventListener('change', function () {
     renderBendTypeButtons();
     renderDynamicFields();
   });
+
   el.referenceEnd.addEventListener('change', renderDynamicFields);
 
   if (el.bendTypeButtons) {
@@ -1292,32 +1291,16 @@ function attachEvents() {
     calculateAndRender();
   });
 
-  if (el.settingsBtn) {
-    el.settingsBtn.addEventListener('click', toggleSettingsPanel);
-  }
-
   if (el.desktopModeBtn) {
     el.desktopModeBtn.addEventListener('click', function () { applyViewMode('desktop'); });
   }
   if (el.mobileModeBtn) {
     el.mobileModeBtn.addEventListener('click', function () { applyViewMode('mobile'); });
   }
-
-  document.getElementById('resetBtn').addEventListener('click', resetForm);
-  document.getElementById('copyBtn').addEventListener('click', copyResult);
-  document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
-  document.getElementById('saveDataBtn').addEventListener('click', saveDataEditor);
-  document.getElementById('loadSavedBtn').addEventListener('click', loadSavedIntoEditor);
-  document.getElementById('loadDefaultsBtn').addEventListener('click', function () {
-    state.data = stripUnsupportedSizes(cloneData(DEFAULT_DATA));
-    syncDataEditor();
-    populateConduitTypes();
-    renderDynamicFields();
-    addMessage('info', 'Loaded editable default conduit/bender data into the editor.');
-  });
+  if (el.darkModeBtn) {
+    el.darkModeBtn.addEventListener('click', toggleTheme);
+  }
 }
-
-
 
 function loadViewMode() {
   try {
@@ -1336,17 +1319,20 @@ function saveViewMode(mode) {
 function applyViewMode(mode) {
   const safeMode = mode === 'mobile' ? 'mobile' : 'desktop';
   document.body.setAttribute('data-view-mode', safeMode);
+
   if (el.desktopModeBtn) {
-    const desktopActive = safeMode === 'desktop';
-    el.desktopModeBtn.classList.toggle('active', desktopActive);
-    el.desktopModeBtn.setAttribute('aria-pressed', desktopActive ? 'true' : 'false');
+    const active = safeMode === 'desktop';
+    el.desktopModeBtn.classList.toggle('active', active);
+    el.desktopModeBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
   }
   if (el.mobileModeBtn) {
-    const mobileActive = safeMode === 'mobile';
-    el.mobileModeBtn.classList.toggle('active', mobileActive);
-    el.mobileModeBtn.setAttribute('aria-pressed', mobileActive ? 'true' : 'false');
+    const active = safeMode === 'mobile';
+    el.mobileModeBtn.classList.toggle('active', active);
+    el.mobileModeBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
   }
+
   saveViewMode(safeMode);
+
   window.requestAnimationFrame(function () {
     if (state.lastResult && state.lastCommon && state.lastSelection) {
       drawDiagram(state.lastResult, state.lastCommon, state.lastSelection);
@@ -1356,18 +1342,36 @@ function applyViewMode(mode) {
   });
 }
 
-function toggleSettingsPanel() {
-  if (!el.dataPanel || !el.settingsBtn) return;
-  const willOpen = el.dataPanel.hasAttribute('hidden');
-  if (willOpen) {
-    el.dataPanel.removeAttribute('hidden');
-    el.dataPanel.classList.remove('is-collapsed');
-  } else {
-    el.dataPanel.setAttribute('hidden', 'hidden');
-    el.dataPanel.classList.add('is-collapsed');
+function loadTheme() {
+  try {
+    return localStorage.getItem('preferredTheme') === 'dark' ? 'dark' : 'light';
+  } catch (error) {
+    return 'light';
   }
-  el.settingsBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-  el.settingsBtn.textContent = willOpen ? 'Close Settings' : 'Settings';
+}
+
+function applyTheme(theme) {
+  const safeTheme = theme === 'dark' ? 'dark' : 'light';
+  document.body.setAttribute('data-theme', safeTheme);
+  if (el.darkModeBtn) {
+    el.darkModeBtn.setAttribute('aria-pressed', safeTheme === 'dark' ? 'true' : 'false');
+  }
+
+  window.requestAnimationFrame(function () {
+    if (state.lastResult && state.lastCommon && state.lastSelection) {
+      drawDiagram(state.lastResult, state.lastCommon, state.lastSelection);
+    } else {
+      drawPlaceholder();
+    }
+  });
+}
+
+function toggleTheme() {
+  const next = document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  try {
+    localStorage.setItem('preferredTheme', next);
+  } catch (error) {}
+  applyTheme(next);
 }
 
 function stripUnsupportedSizes(data) {
@@ -1382,50 +1386,39 @@ function stripUnsupportedSizes(data) {
 
 function populateConduitTypes() {
   const keys = Object.keys(state.data.conduitTypes || {});
-  const current = keys.indexOf(el.conduitType.value) >= 0 ? el.conduitType.value : keys[0];
+  const current = keys.includes(el.conduitType.value) ? el.conduitType.value : keys[0];
+
   el.conduitType.innerHTML = keys.map(function (key) {
     return '<option value="' + escapeHtml(key) + '">' + escapeHtml(key) + '</option>';
   }).join('');
-  if (current) {
-    el.conduitType.value = current;
-  }
+
+  if (current) el.conduitType.value = current;
   populateSizes();
-  populateProfiles();
 }
 
 function populateSizes() {
   const type = getSelectedConduitType();
   const sizeMap = state.data.conduitTypes[type] ? state.data.conduitTypes[type].sizes : {};
   const sizes = Object.keys(sizeMap);
-  const current = sizes.indexOf(el.conduitSize.value) >= 0 ? el.conduitSize.value : sizes[0];
+  const current = sizes.includes(el.conduitSize.value) ? el.conduitSize.value : sizes[0];
+
   el.conduitSize.innerHTML = sizes.map(function (size) {
     return '<option value="' + escapeHtml(size) + '">' + escapeHtml(size) + '</option>';
   }).join('');
-  if (current) {
-    el.conduitSize.value = current;
-  }
+
+  if (current) el.conduitSize.value = current;
 }
 
-function populateProfiles() {
+function updateProfileDisplay() {
   const selection = getCurrentSelection();
-  const profiles = Object.keys(selection.sizeData.profiles || {});
-  const preferred = profiles.indexOf(el.benderProfile.value) >= 0
-    ? el.benderProfile.value
-    : (selection.sizeData.defaultProfile && profiles.indexOf(selection.sizeData.defaultProfile) >= 0
-      ? selection.sizeData.defaultProfile
-      : profiles[0]);
-
-  el.benderProfile.innerHTML = profiles.map(function (profile) {
-    return '<option value="' + escapeHtml(profile) + '">' + escapeHtml(profile) + '</option>';
-  }).join('');
-
-  if (preferred) {
-    el.benderProfile.value = preferred;
+  if (el.profileNameDisplay) {
+    el.profileNameDisplay.textContent = selection.profileName;
   }
 }
 
 function renderBendTypeButtons() {
   if (!el.bendTypeButtons) return;
+
   const icons = {
     stub90: '└',
     backToBack90: '∩',
@@ -1434,6 +1427,7 @@ function renderBendTypeButtons() {
     saddle4: '⌒',
     kick: '⤴'
   };
+
   el.bendTypeButtons.innerHTML = Object.keys(BEND_LABELS).map(function (key) {
     const active = key === el.bendType.value ? ' active' : '';
     return '<button type="button" class="bend-card' + active + '" data-bend-type="' + key + '"><span class="bend-icon">' + (icons[key] || '•') + '</span><span class="bend-label">' + escapeHtml(BEND_LABELS[key]) + '</span></button>';
@@ -1447,16 +1441,22 @@ function sliderFieldHtml(id, label, options) {
   const value = options.value !== undefined ? options.value : min;
   const display = options.display || toNearestSixteenth(Number(value));
   const unit = options.unit || 'in';
+
   return '<label class="slider-field"><span class="slider-top"><span>' + escapeHtml(label) + '</span><strong data-slider-display-for="' + id + '">' + escapeHtml(display) + '</strong></span><input id="' + id + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '" data-unit="' + unit + '"><span class="slider-minmax"><span>' + escapeHtml(toNearestSixteenth(min)) + '</span><span>' + escapeHtml(toNearestSixteenth(max)) + '</span></span></label>';
 }
 
 function angleButtonsHtml(id, label, active, values, allowCustom) {
   active = active === undefined || active === null || active === '' ? values[0] : active;
+
   const buttons = values.map(function (value) {
     const activeClass = String(value) === String(active) ? ' active' : '';
     return '<button type="button" class="angle-chip' + activeClass + '" data-angle-target="' + id + '" data-angle-value="' + value + '">' + value + '°</button>';
   }).join('');
-  const customInput = allowCustom ? '<label><span>Custom angle (optional)</span><input id="' + id + 'Custom" type="number" min="1" max="89" step="0.5" placeholder="Tap a preset or enter custom"></label>' : '';
+
+  const customInput = allowCustom
+    ? '<label><span>Custom angle (optional)</span><input id="' + id + 'Custom" type="number" min="1" max="89" step="0.5" placeholder="Tap a preset or enter custom"></label>'
+    : '';
+
   return '<div class="dynamic-stack"><div><span class="control-label">' + escapeHtml(label) + '</span><div class="angle-button-group">' + buttons + '</div><input id="' + id + '" type="hidden" value="' + active + '"></div>' + customInput + '</div>';
 }
 
@@ -1464,12 +1464,15 @@ function updateSliderDisplay(input) {
   if (!input || input.type !== 'range') return;
   const target = el.dynamicFields.querySelector('[data-slider-display-for="' + input.id + '"]');
   if (!target) return;
-  target.textContent = input.dataset.unit === 'deg' ? fmtAngle(Number(input.value)) : toNearestSixteenth(Number(input.value));
+  target.textContent = input.dataset.unit === 'deg'
+    ? fmtAngle(Number(input.value))
+    : toNearestSixteenth(Number(input.value));
 }
 
 function syncDynamicUi() {
   const ranges = el.dynamicFields.querySelectorAll('input[type="range"]');
   for (let i = 0; i < ranges.length; i += 1) updateSliderDisplay(ranges[i]);
+
   const groups = el.dynamicFields.querySelectorAll('[data-angle-target]');
   for (let i = 0; i < groups.length; i += 1) {
     const button = groups[i];
@@ -1477,6 +1480,7 @@ function syncDynamicUi() {
     const hidden = document.getElementById(targetId);
     button.classList.toggle('active', hidden && String(hidden.value) === String(button.dataset.angleValue));
   }
+
   const cards = el.bendTypeButtons ? el.bendTypeButtons.querySelectorAll('[data-bend-type]') : [];
   for (let i = 0; i < cards.length; i += 1) {
     cards[i].classList.toggle('active', cards[i].dataset.bendType === el.bendType.value);
@@ -1486,9 +1490,7 @@ function syncDynamicUi() {
 function captureDynamicValues() {
   const values = {};
   const nodes = el.dynamicFields.querySelectorAll('input, select, textarea');
-  for (let i = 0; i < nodes.length; i += 1) {
-    values[nodes[i].id] = nodes[i].value;
-  }
+  for (let i = 0; i < nodes.length; i += 1) values[nodes[i].id] = nodes[i].value;
   return values;
 }
 
@@ -1514,7 +1516,6 @@ function renderDynamicFields() {
       '<p class="inline-note prominent">Set the finished stub length from ' + escapeHtml(selectedReference) + '.</p>',
       '<div class="dynamic-stack">',
       sliderFieldHtml('stubLength', 'Stub height from ' + selectedReference, { min: 0, max: 120, value: saved.stubLength || 24 }),
-      '<label><span>Take-up value override (optional inches)</span><input id="takeUpOverride" type="number" min="0" step="0.0625" placeholder="Uses selected profile by default" value="' + escapeHtml(saved.takeUpOverride || '') + '"></label>',
       '</div>'
     ].join(''),
 
@@ -1525,7 +1526,6 @@ function renderDynamicFields() {
       sliderFieldHtml('offsetReferenceDistance', 'Distance to object / start point from ' + selectedReference, { min: 0, max: 120, value: saved.offsetReferenceDistance || 24 }),
       sliderFieldHtml('offsetHeight', 'Offset height', { min: 0, max: 36, value: saved.offsetHeight || 6 }),
       angleButtonsHtml('offsetAnglePreset', 'Angle of bends', saved.offsetAnglePreset || 30, [10, 15, 22.5, 30, 45, 60], true),
-      '<label><span>Optional shrink override (inches)</span><input id="offsetShrinkOverride" type="number" min="0" step="0.0625" placeholder="Geometry used by default" value="' + escapeHtml(saved.offsetShrinkOverride || '') + '"></label>',
       '<div class="hint-card"><strong>Offset note:</strong> spacing uses universal geometry; profile data still controls take-up, radius, and ITool B2 values.</div>',
       '</div>'
     ].join(''),
@@ -1539,10 +1539,9 @@ function renderDynamicFields() {
       (btbMode === 'oppositeStub'
         ? sliderFieldHtml('secondStubLength', 'Second stub from ' + oppositeReference, { min: 0, max: 120, value: saved.secondStubLength || 18 })
         : sliderFieldHtml('distanceBetween90s', 'Distance between bends', { min: 0, max: 120, value: saved.distanceBetween90s || 36 })),
-      '<label><span>Take-up value override (optional inches)</span><input id="btbTakeUpOverride" type="number" min="0" step="0.0625" placeholder="Uses selected profile by default" value="' + escapeHtml(saved.btbTakeUpOverride || '') + '"></label>',
       (btbMode === 'oppositeStub'
         ? '<div class="hint-card"><strong>Second 90:</strong> measured from ' + escapeHtml(oppositeReference) + ' using the same take-up.</div>'
-        : '<label><span>Gain value override (optional inches)</span><input id="btbGainOverride" type="number" min="0" step="0.0625" placeholder="Uses selected profile by default" value="' + escapeHtml(saved.btbGainOverride || '') + '"></label>'),
+        : '<div class="hint-card"><strong>Back-to-back note:</strong> gain comes from the locked profile for this conduit and size.</div>'),
       '</div>'
     ].join(''),
 
@@ -1565,7 +1564,6 @@ function renderDynamicFields() {
       sliderFieldHtml('s4NearEdgeDistance', 'Distance to near edge from ' + selectedReference, { min: 0, max: 120, value: saved.s4NearEdgeDistance || 24 }),
       '<div class="field-inline-grid">' + sliderFieldHtml('s4Height', 'Obstruction height', { min: 0, max: 24, value: saved.s4Height || 4 }) + sliderFieldHtml('s4Width', 'Obstruction width', { min: 0, max: 36, value: saved.s4Width || 8 }) + '</div>',
       angleButtonsHtml('s4Angle', 'Angle of bends', saved.s4Angle || 30, [10, 15, 22.5, 30, 45, 60], true),
-      '<label><span>Optional shrink override (inches)</span><input id="s4ShrinkOverride" type="number" min="0" step="0.0625" placeholder="Geometry used by default" value="' + escapeHtml(saved.s4ShrinkOverride || '') + '"></label>',
       '</div>'
     ].join(''),
 
@@ -1575,7 +1573,6 @@ function renderDynamicFields() {
       '<div class="dynamic-stack">',
       angleButtonsHtml('kickAngle', 'Kick angle', saved.kickAngle || 15, [10, 15, 22.5, 30, 45, 60], true),
       '<div class="field-inline-grid">' + sliderFieldHtml('kickRise', 'Rise', { min: 0, max: 24, value: saved.kickRise || 3 }) + sliderFieldHtml('kickDistanceToBend', 'Distance to bend / tangent point from ' + selectedReference, { min: 0, max: 120, value: saved.kickDistanceToBend || 20 }) + '</div>',
-      '<label><span>Optional gain override (inches)</span><input id="kickGainOverride" type="number" min="0" step="0.0625" placeholder="Uses selected profile by default" value="' + escapeHtml(saved.kickGainOverride || '') + '"></label>',
       '</div>'
     ].join('')
   };
@@ -1622,34 +1619,25 @@ function calculateAndRender() {
         throw new Error('Unsupported bend type.');
     }
   } catch (error) {
-    if (error && error.message) {
-      addMessage('error', error.message);
-    } else {
-      addMessage('error', 'Unexpected calculation error.');
-    }
+    addMessage('error', error && error.message ? error.message : 'Unexpected calculation error.');
     return;
   }
 
   result = applyStockConduitAssumption(result);
 
   if (result.errors && result.errors.length) {
-    result.errors.forEach(function (message) {
-      addMessage('error', message);
-    });
+    result.errors.forEach(function (message) { addMessage('error', message); });
     return;
   }
 
   if (result.warnings && result.warnings.length) {
-    result.warnings.forEach(function (message) {
-      addMessage('warn', message);
-    });
+    result.warnings.forEach(function (message) { addMessage('warn', message); });
   }
 
   state.lastResult = result;
-  renderResult(result, common, selection);
-  state.lastResult = result;
   state.lastCommon = common;
   state.lastSelection = selection;
+  renderResult(result, common, selection);
   drawDiagram(result, common, selection);
 }
 
@@ -1664,25 +1652,19 @@ function collectCommonInputs() {
 function getCurrentSelection() {
   const conduitType = getSelectedConduitType();
   const typeData = state.data.conduitTypes[conduitType];
-  if (!typeData) {
-    throw new Error('Selected conduit type is missing from the data table.');
-  }
+  if (!typeData) throw new Error('Selected conduit type is missing from the data table.');
 
   const size = el.conduitSize.value || Object.keys(typeData.sizes)[0];
   const sizeData = typeData.sizes[size];
-  if (!sizeData) {
-    throw new Error('Selected conduit size is missing from the data table.');
-  }
+  if (!sizeData) throw new Error('Selected conduit size is missing from the data table.');
 
   const profiles = Object.keys(sizeData.profiles || {});
-  const profileName = profiles.indexOf(el.benderProfile.value) >= 0
-    ? el.benderProfile.value
-    : (sizeData.defaultProfile && profiles.indexOf(sizeData.defaultProfile) >= 0 ? sizeData.defaultProfile : profiles[0]);
-  const profileData = sizeData.profiles[profileName];
+  const profileName = sizeData.defaultProfile && profiles.includes(sizeData.defaultProfile)
+    ? sizeData.defaultProfile
+    : profiles[0];
 
-  if (!profileData) {
-    throw new Error('Selected bender profile is missing from the data table.');
-  }
+  const profileData = sizeData.profiles[profileName];
+  if (!profileData) throw new Error('Selected bender profile is missing from the data table.');
 
   return {
     conduitType: conduitType,
@@ -1698,41 +1680,23 @@ function getSelectedConduitType() {
 }
 
 function validateProfileData(profileData, bendType) {
-  if (!profileData) {
-    throw new Error('Missing conduit/bender profile data. Check the editable data table.');
-  }
-
-  if (typeof profileData.takeUp90 !== 'number') {
-    addMessage('warn', 'Selected profile is missing takeUp90. Enter an override or update the data table.');
-  }
-
-  if ((bendType === 'backToBack90' || bendType === 'kick') && typeof profileData.gain90 !== 'number') {
-    addMessage('warn', 'Selected profile is missing gain90. Enter an override or update the data table.');
-  }
-
-  if (typeof profileData.bendRadius !== 'number') {
-    addMessage('warn', 'Selected profile is missing bendRadius. Diagram and clearance notes may be less helpful.');
-  }
+  if (!profileData) throw new Error('Missing conduit/bender profile data.');
+  if (typeof profileData.takeUp90 !== 'number') addMessage('warn', 'Selected profile is missing takeUp90.');
+  if ((bendType === 'backToBack90' || bendType === 'kick') && typeof profileData.gain90 !== 'number') addMessage('warn', 'Selected profile is missing gain90.');
+  if (typeof profileData.bendRadius !== 'number') addMessage('warn', 'Selected profile is missing bendRadius.');
 }
 
 function calculateStub90(common, cfg) {
   const stubLength = parseRequired('stubLength', 'Desired stub length');
-  const takeUpOverride = parseOptional('takeUpOverride');
-  const takeUp = takeUpOverride !== null ? takeUpOverride : cfg.takeUp90;
+  const takeUp = cfg.takeUp90;
   const warnings = [];
   const errors = [];
 
-  if (stubLength === null || stubLength <= 0) {
-    errors.push('Desired stub length must be greater than zero.');
-  }
-  if (takeUp === null || takeUp < 0) {
-    errors.push('Take-up must be available from the profile or entered as an override.');
-  }
+  if (stubLength === null || stubLength <= 0) errors.push('Desired stub length must be greater than zero.');
+  if (takeUp === null || takeUp < 0) errors.push('Take-up must be available from the profile.');
 
   const mark1 = stubLength - takeUp;
-  if (mark1 < 0) {
-    warnings.push('Computed mark falls before the selected reference end because take-up exceeds the stub length.');
-  }
+  if (mark1 < 0) warnings.push('Computed mark falls before the selected reference end because take-up exceeds the stub length.');
 
   return {
     bendType: 'stub90',
@@ -1750,7 +1714,7 @@ function calculateStub90(common, cfg) {
       'Measure the desired stub from ' + referenceLabel(common.referenceEnd) + '.',
       'Mark ' + fmt(mark1, common.rounding) + ' from ' + referenceLabel(common.referenceEnd) + ' using a take-up of ' + fmt(takeUp, common.rounding) + '.',
       'Place the arrow on the mark and bend to 90°.',
-      'Verify the finished stub in the field and adjust the editable take-up table if your bender differs.'
+      'Verify the finished stub in the field.'
     ],
     warnings: warnings,
     errors: errors
@@ -1761,34 +1725,21 @@ function calculateOffset(common, cfg) {
   const referenceDistance = parseRequired('offsetReferenceDistance', 'Distance to start of offset');
   const offsetHeight = parseRequired('offsetHeight', 'Offset height');
   const angle = parseRequired('offsetAnglePreset', 'Offset angle');
-  const shrinkOverride = parseOptional('offsetShrinkOverride');
   const errors = [];
   const warnings = [];
 
-  if (referenceDistance === null || referenceDistance < 0) {
-    errors.push('Distance to start of offset must be zero or greater.');
-  }
-  if (offsetHeight === null || offsetHeight <= 0) {
-    errors.push('Offset height must be greater than zero.');
-  }
-  if (angle === null || angle <= 0 || angle >= 90) {
-    errors.push('Offset angle must be between 0° and 90° (exclusive).');
-  }
+  if (referenceDistance === null || referenceDistance < 0) errors.push('Distance to start of offset must be zero or greater.');
+  if (offsetHeight === null || offsetHeight <= 0) errors.push('Offset height must be greater than zero.');
+  if (angle === null || angle <= 0 || angle >= 90) errors.push('Offset angle must be between 0° and 90° (exclusive).');
 
   const distanceBetweenBends = universal.offsetSpacing(offsetHeight, angle);
-  const shrink = shrinkOverride !== null ? shrinkOverride : universal.offsetShrink(offsetHeight, angle);
+  const shrink = universal.offsetShrink(offsetHeight, angle);
   const mark1 = referenceDistance - shrink;
   const mark2 = mark1 + distanceBetweenBends;
 
-  if (mark1 < 0) {
-    warnings.push('Mark 1 is before the selected reference end. Check the reference distance or shrink assumption.');
-  }
-  if (angle > 60) {
-    warnings.push('Angles above 60° are uncommon and may be difficult or unrealistic in the field.');
-  }
-  if (cfg.minimumRadius && offsetHeight < cfg.minimumRadius * 0.1) {
-    warnings.push('Very small offset relative to bend radius may be hard to reproduce accurately.');
-  }
+  if (mark1 < 0) warnings.push('Mark 1 is before the selected reference end. Check the reference distance or shrink assumption.');
+  if (angle > 60) warnings.push('Angles above 60° are uncommon and may be difficult or unrealistic in the field.');
+  if (cfg.minimumRadius && offsetHeight < cfg.minimumRadius * 0.1) warnings.push('Very small offset relative to bend radius may be hard to reproduce accurately.');
 
   return {
     bendType: 'offset',
@@ -1820,8 +1771,8 @@ function calculateOffset(common, cfg) {
 function calculateBackToBack90(common, cfg) {
   const firstStubLength = parseRequired('firstStubLength', 'First stub length');
   const mode = document.getElementById('btbSecondMeasure').value || 'spacing';
-  const takeUp = parseOptional('btbTakeUpOverride') !== null ? parseOptional('btbTakeUpOverride') : cfg.takeUp90;
-  const gain = parseOptional('btbGainOverride') !== null ? parseOptional('btbGainOverride') : (typeof cfg.gain90 === 'number' ? cfg.gain90 : 0);
+  const takeUp = cfg.takeUp90;
+  const gain = typeof cfg.gain90 === 'number' ? cfg.gain90 : 0;
   const errors = [];
   const warnings = [];
   const marks = [];
@@ -1833,19 +1784,13 @@ function calculateBackToBack90(common, cfg) {
   const instructions = [];
   let spacing = [];
 
-  if (firstStubLength === null || firstStubLength <= 0) {
-    errors.push('First stub length must be greater than zero.');
-  }
-  if (takeUp === null || takeUp < 0) {
-    errors.push('Take-up must be available from the profile or entered as an override.');
-  }
+  if (firstStubLength === null || firstStubLength <= 0) errors.push('First stub length must be greater than zero.');
+  if (takeUp === null || takeUp < 0) errors.push('Take-up must be available from the profile.');
 
   const firstMark = firstStubLength - takeUp;
   marks.push(makeMark('Mark 1', firstMark, common.referenceEnd));
 
-  if (firstMark < 0) {
-    warnings.push('Mark 1 is before the selected reference end because take-up exceeds the first stub length.');
-  }
+  if (firstMark < 0) warnings.push('Mark 1 is before the selected reference end because take-up exceeds the first stub length.');
 
   instructions.push('Mark the first 90 at ' + fmt(firstMark, common.rounding) + ' from ' + referenceLabel(common.referenceEnd) + ' using a take-up of ' + fmt(takeUp, common.rounding) + '.');
   instructions.push('Bend the first 90° and keep the conduit in plane for the second bend.');
@@ -1858,17 +1803,13 @@ function calculateBackToBack90(common, cfg) {
     metrics.secondStubLength = secondStubLength;
     metrics.gain = 'Not used in opposite-end stub mode';
 
-    if (secondStubLength === null || secondStubLength <= 0) {
-      errors.push('Second stub length must be greater than zero.');
-    }
-    if (secondMark < 0) {
-      warnings.push('Mark 2 is before the opposite reference end because take-up exceeds the second stub length.');
-    }
+    if (secondStubLength === null || secondStubLength <= 0) errors.push('Second stub length must be greater than zero.');
+    if (secondMark < 0) warnings.push('Mark 2 is before the opposite reference end because take-up exceeds the second stub length.');
 
     marks.push(makeMark('Mark 2', secondMark, secondReference));
     instructions.push('Flip or reposition the conduit and measure from ' + referenceLabel(secondReference) + '.');
     instructions.push('Mark the second 90 at ' + fmt(secondMark, common.rounding) + ' from ' + referenceLabel(secondReference) + '.');
-    instructions.push('Bend the second 90° while keeping the bends aligned. Verify the finished center section against your field layout.');
+    instructions.push('Bend the second 90° while keeping the bends aligned.');
   } else {
     const distanceBetween90s = parseRequired('distanceBetween90s', 'Distance between bends');
     const secondMark = firstMark + distanceBetween90s - gain;
@@ -1878,12 +1819,8 @@ function calculateBackToBack90(common, cfg) {
     metrics.developedLengthAdjustment = gain;
     spacing = [secondMark - firstMark];
 
-    if (distanceBetween90s === null || distanceBetween90s <= 0) {
-      errors.push('Distance between bends must be greater than zero.');
-    }
-    if (secondMark <= firstMark) {
-      warnings.push('Computed second mark is not beyond the first mark. Verify the distance and gain.');
-    }
+    if (distanceBetween90s === null || distanceBetween90s <= 0) errors.push('Distance between bends must be greater than zero.');
+    if (secondMark <= firstMark) warnings.push('Computed second mark is not beyond the first mark. Verify the distance and gain.');
 
     marks.push(makeMark('Mark 2', secondMark, common.referenceEnd));
     instructions.push('Measure to the second 90 location and mark ' + fmt(secondMark, common.rounding) + ' from ' + referenceLabel(common.referenceEnd) + '.');
@@ -1912,36 +1849,20 @@ function calculate3PointSaddle(common, cfg) {
   const errors = [];
   const warnings = [];
 
-  if ([centerlineDistance, height, width, centerAngle, sideAngle].some(function (value) { return value === null; })) {
-    errors.push('All 3-point saddle inputs are required.');
-  }
-  if (centerlineDistance !== null && centerlineDistance < 0) {
-    errors.push('Distance to obstruction centerline must be zero or greater.');
-  }
-  if (height !== null && height <= 0) {
-    errors.push('Obstruction height must be greater than zero.');
-  }
-  if (width !== null && width <= 0) {
-    errors.push('Obstruction width must be greater than zero.');
-  }
-  if (centerAngle !== null && (centerAngle <= 0 || centerAngle >= 90)) {
-    errors.push('Center angle must be between 0° and 90°.');
-  }
-  if (sideAngle !== null && (sideAngle <= 0 || sideAngle >= 90)) {
-    errors.push('Side angle must be between 0° and 90°.');
-  }
-  if (Math.abs(centerAngle - (2 * sideAngle)) > 0.5) {
-    warnings.push('Typical 3-point saddles use a center angle about twice the side angle.');
-  }
+  if ([centerlineDistance, height, width, centerAngle, sideAngle].some(function (value) { return value === null; })) errors.push('All 3-point saddle inputs are required.');
+  if (centerlineDistance !== null && centerlineDistance < 0) errors.push('Distance to obstruction centerline must be zero or greater.');
+  if (height !== null && height <= 0) errors.push('Obstruction height must be greater than zero.');
+  if (width !== null && width <= 0) errors.push('Obstruction width must be greater than zero.');
+  if (centerAngle !== null && (centerAngle <= 0 || centerAngle >= 90)) errors.push('Center angle must be between 0° and 90°.');
+  if (sideAngle !== null && (sideAngle <= 0 || sideAngle >= 90)) errors.push('Side angle must be between 0° and 90°.');
+  if (Math.abs(centerAngle - (2 * sideAngle)) > 0.5) warnings.push('Typical 3-point saddles use a center angle about twice the side angle.');
 
   const outsideToCenter = Math.max(universal.offsetSpacing(height, sideAngle), width / 2 + (cfg.bendRadius || 0));
   const mark2 = centerlineDistance;
   const mark1 = mark2 - outsideToCenter;
   const mark3 = mark2 + outsideToCenter;
 
-  if (mark1 < 0) {
-    warnings.push('The first outside mark falls before the selected reference end.');
-  }
+  if (mark1 < 0) warnings.push('The first outside mark falls before the selected reference end.');
 
   return {
     bendType: 'saddle3',
@@ -1964,8 +1885,7 @@ function calculate3PointSaddle(common, cfg) {
       'Place the center mark at ' + fmt(mark2, common.rounding) + ' from ' + referenceLabel(common.referenceEnd) + ' aligned to the obstruction centerline.',
       'Mark the outside bends at ' + fmt(mark1, common.rounding) + ' and ' + fmt(mark3, common.rounding) + '.',
       'Bend the center mark to ' + fmtAngle(centerAngle) + '.',
-      'Bend each outer mark to ' + fmtAngle(sideAngle) + ' in the opposite direction to form the saddle.',
-      'Check clearance over the obstruction and adjust spacing or angles to your field standard if needed.'
+      'Bend each outer mark to ' + fmtAngle(sideAngle) + ' in the opposite direction to form the saddle.'
     ],
     warnings: warnings,
     errors: errors
@@ -1977,36 +1897,23 @@ function calculate4PointSaddle(common, cfg) {
   const height = parseRequired('s4Height', 'Obstruction height');
   const width = parseRequired('s4Width', 'Obstruction width');
   const angle = parseRequired('s4Angle', 'Chosen angle');
-  const shrinkOverride = parseOptional('s4ShrinkOverride');
   const errors = [];
   const warnings = [];
 
-  if ([nearEdgeDistance, height, width, angle].some(function (value) { return value === null; })) {
-    errors.push('All 4-point saddle inputs are required.');
-  }
-  if (nearEdgeDistance !== null && nearEdgeDistance < 0) {
-    errors.push('Distance to near edge of obstruction must be zero or greater.');
-  }
-  if (height !== null && height <= 0) {
-    errors.push('Obstruction height must be greater than zero.');
-  }
-  if (width !== null && width <= 0) {
-    errors.push('Obstruction width must be greater than zero.');
-  }
-  if (angle !== null && (angle <= 0 || angle >= 90)) {
-    errors.push('Chosen angle must be between 0° and 90°.');
-  }
+  if ([nearEdgeDistance, height, width, angle].some(function (value) { return value === null; })) errors.push('All 4-point saddle inputs are required.');
+  if (nearEdgeDistance !== null && nearEdgeDistance < 0) errors.push('Distance to near edge of obstruction must be zero or greater.');
+  if (height !== null && height <= 0) errors.push('Obstruction height must be greater than zero.');
+  if (width !== null && width <= 0) errors.push('Obstruction width must be greater than zero.');
+  if (angle !== null && (angle <= 0 || angle >= 90)) errors.push('Chosen angle must be between 0° and 90°.');
 
   const offsetSpacing = universal.offsetSpacing(height, angle);
-  const shrink = shrinkOverride !== null ? shrinkOverride : universal.offsetShrink(height, angle);
+  const shrink = universal.offsetShrink(height, angle);
   const mark1 = nearEdgeDistance - shrink;
   const mark2 = mark1 + offsetSpacing;
   const mark3 = mark2 + width;
   const mark4 = mark3 + offsetSpacing;
 
-  if (mark1 < 0) {
-    warnings.push('The first saddle mark falls before the selected reference end.');
-  }
+  if (mark1 < 0) warnings.push('The first saddle mark falls before the selected reference end.');
 
   return {
     bendType: 'saddle4',
@@ -2041,33 +1948,21 @@ function calculateKick(common, cfg) {
   const angle = parseRequired('kickAngle', 'Kick angle');
   const rise = parseRequired('kickRise', 'Rise');
   const distanceToBend = parseRequired('kickDistanceToBend', 'Distance to bend');
-  const gain = parseOptional('kickGainOverride') !== null ? parseOptional('kickGainOverride') : (typeof cfg.gain90 === 'number' ? cfg.gain90 : 0);
+  const gain = typeof cfg.gain90 === 'number' ? cfg.gain90 : 0;
   const errors = [];
   const warnings = [];
 
-  if ([angle, rise, distanceToBend].some(function (value) { return value === null; })) {
-    errors.push('All kick bend inputs are required.');
-  }
-  if (rise !== null && rise <= 0) {
-    errors.push('Rise must be greater than zero.');
-  }
-  if (distanceToBend !== null && distanceToBend < 0) {
-    errors.push('Distance to bend cannot be negative.');
-  }
-  if (angle !== null && (angle <= 0 || angle >= 90)) {
-    errors.push('Kick angle must be between 0° and 90°.');
-  }
+  if ([angle, rise, distanceToBend].some(function (value) { return value === null; })) errors.push('All kick bend inputs are required.');
+  if (rise !== null && rise <= 0) errors.push('Rise must be greater than zero.');
+  if (distanceToBend !== null && distanceToBend < 0) errors.push('Distance to bend cannot be negative.');
+  if (angle !== null && (angle <= 0 || angle >= 90)) errors.push('Kick angle must be between 0° and 90°.');
 
   const travel = universal.kickTravel(rise, angle);
   const setback = universal.kickSetback(rise, angle);
   const mark1 = distanceToBend - gain;
 
-  if (mark1 < 0) {
-    warnings.push('The kick mark falls before the selected reference end.');
-  }
-  if (angle > 45) {
-    warnings.push('Kick angles above 45° are uncommon and may need special setup.');
-  }
+  if (mark1 < 0) warnings.push('The kick mark falls before the selected reference end.');
+  if (angle > 45) warnings.push('Kick angles above 45° are uncommon and may need special setup.');
 
   return {
     bendType: 'kick',
@@ -2084,8 +1979,7 @@ function calculateKick(common, cfg) {
     instructions: [
       'Mark the kick at ' + fmt(mark1, common.rounding) + ' from ' + referenceLabel(common.referenceEnd) + '.',
       'Bend to ' + fmtAngle(angle) + ' to produce approximately ' + fmt(rise, common.rounding) + ' of rise.',
-      'This kick uses a travel of ' + fmt(travel, common.rounding) + ' and a setback of ' + fmt(setback, common.rounding) + ' based on geometry.',
-      'Check the finished rise and update the editable gain value if your bender setup consistently differs.'
+      'This kick uses a travel of ' + fmt(travel, common.rounding) + ' and a setback of ' + fmt(setback, common.rounding) + ' based on geometry.'
     ],
     warnings: warnings,
     errors: errors
@@ -2093,46 +1987,30 @@ function calculateKick(common, cfg) {
 }
 
 const universal = {
-  degreesToRadians: function (deg) {
-    return (deg * Math.PI) / 180;
-  },
-  offsetSpacing: function (offsetHeight, angleDeg) {
-    return offsetHeight / Math.sin(this.degreesToRadians(angleDeg));
-  },
-  offsetMultiplier: function (angleDeg) {
-    return 1 / Math.sin(this.degreesToRadians(angleDeg));
-  },
-  offsetShrink: function (offsetHeight, angleDeg) {
-    return offsetHeight * Math.tan(this.degreesToRadians(angleDeg / 2));
-  },
-  kickTravel: function (rise, angleDeg) {
-    return rise / Math.sin(this.degreesToRadians(angleDeg));
-  },
-  kickSetback: function (rise, angleDeg) {
-    return rise / Math.tan(this.degreesToRadians(angleDeg));
-  }
+  degreesToRadians: function (deg) { return (deg * Math.PI) / 180; },
+  offsetSpacing: function (offsetHeight, angleDeg) { return offsetHeight / Math.sin(this.degreesToRadians(angleDeg)); },
+  offsetMultiplier: function (angleDeg) { return 1 / Math.sin(this.degreesToRadians(angleDeg)); },
+  offsetShrink: function (offsetHeight, angleDeg) { return offsetHeight * Math.tan(this.degreesToRadians(angleDeg / 2)); },
+  kickTravel: function (rise, angleDeg) { return rise / Math.sin(this.degreesToRadians(angleDeg)); },
+  kickSetback: function (rise, angleDeg) { return rise / Math.tan(this.degreesToRadians(angleDeg)); }
 };
 
 function absoluteMarkPosition(mark, stockLength) {
   const length = Number.isFinite(stockLength) ? stockLength : STOCK_LENGTH_INCHES;
   const position = Number(mark && mark.position);
-  if (!Number.isFinite(position)) {
-    return position;
-  }
+  if (!Number.isFinite(position)) return position;
   return mark && mark.referenceEnd === 'far' ? length - position : position;
 }
 
 function applyStockConduitAssumption(result) {
   const enriched = result || {};
   const marks = enriched.marks || [];
-
   enriched.stockLength = STOCK_LENGTH_INCHES;
   enriched.warnings = enriched.warnings || [];
 
   marks.forEach(function (mark) {
     const absolute = absoluteMarkPosition(mark, STOCK_LENGTH_INCHES);
     mark.absolutePosition = absolute;
-
     if (Number.isFinite(absolute) && (absolute < 0 || absolute > STOCK_LENGTH_INCHES)) {
       enriched.warnings.push(mark.label + ' falls outside the fixed 120 in stock conduit. Check the reference end and entered dimensions.');
     }
@@ -2141,7 +2019,6 @@ function applyStockConduitAssumption(result) {
   if (enriched.bendType === 'backToBack90' && marks.length >= 2) {
     const firstAbsolute = absoluteMarkPosition(marks[0], STOCK_LENGTH_INCHES);
     const secondAbsolute = absoluteMarkPosition(marks[1], STOCK_LENGTH_INCHES);
-
     if (Number.isFinite(firstAbsolute) && Number.isFinite(secondAbsolute) && secondAbsolute <= firstAbsolute) {
       enriched.warnings.push('The second 90 location overlaps or passes the first bend on a 120 in stock conduit. Check the stub lengths or bend-to-bend distance.');
     }
@@ -2151,18 +2028,11 @@ function applyStockConduitAssumption(result) {
 }
 
 function makeMark(label, position, referenceEnd) {
-  return {
-    label: label,
-    position: position,
-    referenceEnd: referenceEnd
-  };
+  return { label: label, position: position, referenceEnd: referenceEnd };
 }
 
 function normalizeMarks(result, common) {
-  if (result.marks && result.marks.length) {
-    return result.marks;
-  }
-
+  if (result.marks && result.marks.length) return result.marks;
   const positions = result.markPositions || [];
   return positions.map(function (value, index) {
     return makeMark('Mark ' + (index + 1), value, common.referenceEnd);
@@ -2187,7 +2057,7 @@ function renderResult(result, common, selection) {
 
   el.resultSummary.classList.remove('empty');
   el.resultSummary.innerHTML = [
-    '<div class="eyebrow-row"><span class="eyebrow-pill">Rounded to nearest 1/16\"</span><span class="eyebrow-pill soft">120 in stock conduit</span></div>',
+    '<div class="eyebrow-row"><span class="eyebrow-pill">Rounded to nearest 1/16\\"</span><span class="eyebrow-pill soft">120 in stock conduit</span></div>',
     '<div class="kv">',
     '<div>Conduit</div><strong>' + escapeHtml(selection.size) + ' ' + escapeHtml(selection.conduitType) + '</strong>',
     '<div>Bender profile</div><strong>' + escapeHtml(selection.profileName) + '</strong>',
@@ -2201,11 +2071,9 @@ function renderResult(result, common, selection) {
     '<div><strong>Spacing / layout</strong>\n' + escapeHtml(spacingLines) + '</div>',
     '<br />',
     '<div><strong>Values used</strong>\n' + escapeHtml(metricsLines) + '</div>',
-    '<div class="instructions">',
-    '<strong>Step-by-step instructions</strong>',
-    '<ol>' + (result.instructions || []).map(function (line) { return '<li>' + escapeHtml(line) + '</li>'; }).join('') + '</ol>',
-    '</div>',
-    '<div class="small">Profile data stays editable. Verify take-up, gain, hook marks, and radius against the actual bender chart before field use.</div>'
+    '<div class="instructions"><strong>Step-by-step instructions</strong><ol>' + (result.instructions || []).map(function (line) {
+      return '<li>' + escapeHtml(line) + '</li>';
+    }).join('') + '</ol></div>'
   ].join('');
 }
 
@@ -2215,7 +2083,7 @@ function resizeCanvasForViewMode() {
   const mobileMode = document.body.getAttribute('data-view-mode') === 'mobile';
   if (mobileMode) {
     canvas.width = 900;
-    canvas.height = 1950;
+    canvas.height = 1400;
   } else {
     canvas.width = 1200;
     canvas.height = 600;
@@ -2225,17 +2093,19 @@ function resizeCanvasForViewMode() {
 function drawPlaceholder() {
   resizeCanvasForViewMode();
   const ctx = el.diagramCanvas.getContext('2d');
+  const dark = document.body.getAttribute('data-theme') === 'dark';
+
   ctx.clearRect(0, 0, el.diagramCanvas.width, el.diagramCanvas.height);
-  ctx.fillStyle = '#fffdf9';
+  ctx.fillStyle = dark ? '#161b22' : '#fffdf9';
   ctx.fillRect(0, 0, el.diagramCanvas.width, el.diagramCanvas.height);
+
+  ctx.fillStyle = dark ? '#f8fafc' : '#8a3f00';
   const mobileMode = document.body.getAttribute('data-view-mode') === 'mobile';
-  ctx.fillStyle = '#8a3f00';
   ctx.font = mobileMode ? '40px Arial' : '24px Arial';
   ctx.fillText('Bend diagram and labeled dimensions will appear here after calculation.', 32, mobileMode ? 90 : 60);
   ctx.font = mobileMode ? '28px Arial' : '18px Arial';
   ctx.fillText('Fixed stock conduit length: 120 in. Diagrams label marks, heights, and bend angles.', 32, mobileMode ? 140 : 96);
 }
-
 
 function drawDiagram(result, common, selection) {
   resizeCanvasForViewMode();
@@ -2248,14 +2118,15 @@ function drawDiagram(result, common, selection) {
   const baselineY = h - 95;
   const stockLength = common.stockLength || STOCK_LENGTH_INCHES;
   const scale = (w - padding * 2) / stockLength;
+  const dark = document.body.getAttribute('data-theme') === 'dark';
 
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#fffdf9';
+  ctx.fillStyle = dark ? '#11161d' : '#fffdf9';
   ctx.fillRect(0, 0, w, h);
 
-  drawHorizontalMeasure(ctx, padding, w - padding, 64, '120 in stock conduit');
+  drawHorizontalMeasure(ctx, padding, w - padding, 64, '120 in stock conduit', dark);
 
-  ctx.strokeStyle = '#f3c18e';
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.12)' : '#f3c18e';
   ctx.lineWidth = 1;
   for (let inch = 0; inch <= stockLength; inch += 12) {
     const x = padding + (inch * scale);
@@ -2264,28 +2135,19 @@ function drawDiagram(result, common, selection) {
     ctx.lineTo(x, baselineY + 18);
     ctx.stroke();
 
-    ctx.fillStyle = '#9a6b45';
+    ctx.fillStyle = dark ? '#cbd5e1' : '#9a6b45';
     ctx.font = '12px Arial';
     ctx.fillText(String(inch), x - 8, baselineY + 36);
   }
 
-  ctx.strokeStyle = '#8a3f00';
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(padding, baselineY);
-  ctx.lineTo(w - padding, baselineY);
-  ctx.stroke();
-
-  ctx.fillStyle = '#8a3f00';
+  ctx.fillStyle = dark ? '#f8fafc' : '#8a3f00';
   ctx.font = '18px Arial';
   ctx.fillText(selection.size + ' ' + selection.conduitType + ' | ' + BEND_LABELS[result.bendType], padding, 40);
   ctx.fillText('End A', padding - 8, baselineY + 62);
   ctx.fillText('End B', w - padding - 48, baselineY + 62);
 
   const plottedMarks = marks.map(function (mark, index) {
-    const absolute = Number.isFinite(mark.absolutePosition)
-      ? mark.absolutePosition
-      : absoluteMarkPosition(mark, stockLength);
+    const absolute = Number.isFinite(mark.absolutePosition) ? mark.absolutePosition : absoluteMarkPosition(mark, stockLength);
     const safeAbsolute = Math.max(Math.min(absolute, stockLength), 0);
     const x = padding + (safeAbsolute * scale);
 
@@ -2300,128 +2162,174 @@ function drawDiagram(result, common, selection) {
     ctx.font = 'bold 16px Arial';
     ctx.fillText('M' + (index + 1), x - 14, baselineY - 66);
 
-    ctx.fillStyle = '#8a3f00';
+    ctx.fillStyle = dark ? '#f8fafc' : '#8a3f00';
     ctx.font = '15px Arial';
     ctx.fillText(fmt(mark.position, common.rounding), x - 34, baselineY + 56);
     ctx.font = '12px Arial';
     ctx.fillText(referenceLabel(mark.referenceEnd), x - 18, baselineY + 76);
 
-    return {
-      x: x,
-      label: mark.label,
-      referenceEnd: mark.referenceEnd,
-      absolutePosition: safeAbsolute
-    };
+    return { x: x, absolutePosition: safeAbsolute };
   });
 
-  drawSimplePath(ctx, result, plottedMarks, baselineY, padding, w, common);
+  drawSimplePath(ctx, result, plottedMarks, baselineY, padding, w, common, dark);
 }
 
-function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, common) {
+function drawRoundedPolyline(ctx, points, radius) {
+  if (!points.length) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const next = points[i + 1];
+    const d1 = Math.hypot(curr.x - prev.x, curr.y - prev.y) || 1;
+    const d2 = Math.hypot(next.x - curr.x, next.y - curr.y) || 1;
+    const r = Math.min(radius, d1 / 2, d2 / 2);
+
+    const p1x = curr.x - ((curr.x - prev.x) / d1) * r;
+    const p1y = curr.y - ((curr.y - prev.y) / d1) * r;
+    const p2x = curr.x + ((next.x - curr.x) / d2) * r;
+    const p2y = curr.y + ((next.y - curr.y) / d2) * r;
+
+    ctx.lineTo(p1x, p1y);
+    ctx.quadraticCurveTo(curr.x, curr.y, p2x, p2y);
+  }
+
+  const last = points[points.length - 1];
+  ctx.lineTo(last.x, last.y);
+}
+
+function strokeMetallicConduit(ctx, points, dark) {
+  const ys = points.map(function (p) { return p.y; });
+  const minY = Math.min.apply(null, ys);
+  const maxY = Math.max.apply(null, ys);
+  const conduitGrad = ctx.createLinearGradient(0, minY - 30, 0, maxY + 30);
+
+  if (dark) {
+    conduitGrad.addColorStop(0, '#5b6572');
+    conduitGrad.addColorStop(0.5, '#d5dbe3');
+    conduitGrad.addColorStop(1, '#4a5360');
+  } else {
+    conduitGrad.addColorStop(0, '#7c8794');
+    conduitGrad.addColorStop(0.5, '#f8fafc');
+    conduitGrad.addColorStop(1, '#646f7d');
+  }
+
+  ctx.save();
+  ctx.strokeStyle = conduitGrad;
+  ctx.lineWidth = 18;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  drawRoundedPolyline(ctx, points, 26);
+  ctx.stroke();
+
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.52)';
+  ctx.lineWidth = 5;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  const highlight = points.map(function (p) { return { x: p.x, y: p.y - 3 }; });
+  drawRoundedPolyline(ctx, highlight, 24);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, common, dark) {
   const xs = plottedMarks.map(function (mark) { return mark.x; }).sort(function (a, b) { return a - b; });
   const firstX = xs[0] || padding + 120;
   const lastX = xs[xs.length - 1] || padding + 240;
   const defaultRunEnd = Math.min(lastX + 150, width - padding);
-
-  ctx.strokeStyle = '#fb923c';
-  ctx.lineWidth = 8;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(padding, baselineY);
+  let points = [];
 
   if (result.bendType === 'stub90') {
     const x = firstX;
     const topY = baselineY - 132;
-    ctx.lineTo(x, baselineY);
-    ctx.lineTo(x, topY);
-    ctx.stroke();
-
-    drawVerticalMeasure(ctx, Math.min(x + 46, width - padding + 10), topY, baselineY, 'Stub height ' + fmt(result.metrics.stubLength, common.rounding));
-    drawAngleCallout(ctx, x, topY + 6, fmtAngle(90), clamp(x + 18, padding + 20, width - padding - 112), 78);
+    points = [{ x: padding, y: baselineY }, { x: x, y: baselineY }, { x: x, y: topY }];
+    strokeMetallicConduit(ctx, points, dark);
+    drawVerticalMeasure(ctx, Math.min(x + 46, width - padding + 10), topY, baselineY, 'Stub height ' + fmt(result.metrics.stubLength, common.rounding), dark);
+    drawAngleCallout(ctx, x, topY + 6, fmtAngle(90), clamp(x + 18, padding + 20, width - padding - 112), 78, dark);
     return;
   }
 
   if (result.bendType === 'offset' && xs.length >= 2) {
     const riseY = baselineY - 86;
     const runEnd = Math.min(xs[1] + 170, width - padding);
-    ctx.lineTo(xs[0], baselineY);
-    ctx.lineTo(xs[1], riseY);
-    ctx.lineTo(runEnd, riseY);
-    ctx.stroke();
-
-    drawVerticalMeasure(ctx, Math.min(runEnd - 12, width - padding - 6), riseY, baselineY, 'Offset height ' + fmt(result.metrics.offsetHeight, common.rounding));
-    drawAngleCallout(ctx, xs[0] + 10, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 34, padding + 8, width - padding - 112), 78);
-    drawAngleCallout(ctx, xs[1] - 8, riseY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 20, padding + 8, width - padding - 112), 118);
+    points = [{ x: padding, y: baselineY }, { x: xs[0], y: baselineY }, { x: xs[1], y: riseY }, { x: runEnd, y: riseY }];
+    strokeMetallicConduit(ctx, points, dark);
+    drawVerticalMeasure(ctx, Math.min(runEnd - 12, width - padding - 6), riseY, baselineY, 'Offset height ' + fmt(result.metrics.offsetHeight, common.rounding), dark);
+    drawAngleCallout(ctx, xs[0] + 10, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 34, padding + 8, width - padding - 112), 78, dark);
+    drawAngleCallout(ctx, xs[1] - 8, riseY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 20, padding + 8, width - padding - 112), 118, dark);
     return;
   }
 
   if (result.bendType === 'backToBack90' && xs.length >= 2) {
     const topY = baselineY - 112;
-    ctx.lineTo(xs[0], baselineY);
-    ctx.lineTo(xs[0], topY);
-    ctx.lineTo(xs[1], topY);
-    ctx.lineTo(xs[1], baselineY);
-    ctx.lineTo(Math.min(xs[1] + 90, width - padding), baselineY);
-    ctx.stroke();
-
-    drawAngleCallout(ctx, xs[0], topY + 8, '90°', clamp(xs[0] - 24, padding + 8, width - padding - 112), 84);
-    drawAngleCallout(ctx, xs[1], topY + 8, '90°', clamp(xs[1] - 24, padding + 8, width - padding - 112), 84);
-    drawHorizontalMeasure(ctx, xs[0], xs[1], topY - 28, result.metrics.distanceBetween90s
-      ? 'Bend-to-bend ' + fmt(result.metrics.distanceBetween90s, common.rounding)
-      : 'Center section');
+    points = [
+      { x: padding, y: baselineY },
+      { x: xs[0], y: baselineY },
+      { x: xs[0], y: topY },
+      { x: xs[1], y: topY },
+      { x: xs[1], y: baselineY },
+      { x: Math.min(xs[1] + 90, width - padding), y: baselineY }
+    ];
+    strokeMetallicConduit(ctx, points, dark);
+    drawAngleCallout(ctx, xs[0], topY + 8, '90°', clamp(xs[0] - 24, padding + 8, width - padding - 112), 84, dark);
+    drawAngleCallout(ctx, xs[1], topY + 8, '90°', clamp(xs[1] - 24, padding + 8, width - padding - 112), 84, dark);
+    drawHorizontalMeasure(ctx, xs[0], xs[1], topY - 28, result.metrics.distanceBetween90s ? 'Bend-to-bend ' + fmt(result.metrics.distanceBetween90s, common.rounding) : 'Center section', dark);
     return;
   }
 
   if (result.bendType === 'saddle3' && xs.length >= 3) {
     const peakY = baselineY - 84;
-    ctx.lineTo(xs[0], baselineY);
-    ctx.lineTo(xs[1], peakY);
-    ctx.lineTo(xs[2], baselineY);
-    ctx.lineTo(Math.min(xs[2] + 150, width - padding), baselineY);
-    ctx.stroke();
-
-    drawVerticalMeasure(ctx, xs[1] + 52, peakY, baselineY, 'Saddle height ' + fmt(result.metrics.obstructionHeight, common.rounding));
-    drawAngleCallout(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 34, padding + 8, width - padding - 112), 108);
-    drawAngleCallout(ctx, xs[1], peakY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 24, padding + 8, width - padding - 112), 78);
-    drawAngleCallout(ctx, xs[2] - 8, baselineY - 6, fmtAngle(result.angles[2]), clamp(xs[2] - 40, padding + 8, width - padding - 112), 108);
+    points = [
+      { x: padding, y: baselineY },
+      { x: xs[0], y: baselineY },
+      { x: xs[1], y: peakY },
+      { x: xs[2], y: baselineY },
+      { x: Math.min(xs[2] + 150, width - padding), y: baselineY }
+    ];
+    strokeMetallicConduit(ctx, points, dark);
+    drawVerticalMeasure(ctx, xs[1] + 52, peakY, baselineY, 'Saddle height ' + fmt(result.metrics.obstructionHeight, common.rounding), dark);
+    drawAngleCallout(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 34, padding + 8, width - padding - 112), 108, dark);
+    drawAngleCallout(ctx, xs[1], peakY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 24, padding + 8, width - padding - 112), 78, dark);
+    drawAngleCallout(ctx, xs[2] - 8, baselineY - 6, fmtAngle(result.angles[2]), clamp(xs[2] - 40, padding + 8, width - padding - 112), 108, dark);
     return;
   }
 
   if (result.bendType === 'saddle4' && xs.length >= 4) {
     const plateauY = baselineY - 76;
-    ctx.lineTo(xs[0], baselineY);
-    ctx.lineTo(xs[1], plateauY);
-    ctx.lineTo(xs[2], plateauY);
-    ctx.lineTo(xs[3], baselineY);
-    ctx.lineTo(Math.min(xs[3] + 130, width - padding), baselineY);
-    ctx.stroke();
-
-    drawVerticalMeasure(ctx, Math.min(xs[3] + 42, width - padding - 10), plateauY, baselineY, 'Offset height ' + fmt(result.metrics.obstructionHeight, common.rounding));
-    drawAngleCallout(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 36, padding + 8, width - padding - 112), 112);
-    drawAngleCallout(ctx, xs[1], plateauY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 32, padding + 8, width - padding - 112), 78);
-    drawAngleCallout(ctx, xs[2], plateauY - 8, fmtAngle(result.angles[2]), clamp(xs[2] - 16, padding + 8, width - padding - 112), 118);
-    drawAngleCallout(ctx, xs[3] - 8, baselineY - 6, fmtAngle(result.angles[3]), clamp(xs[3] - 44, padding + 8, width - padding - 112), 112);
+    points = [
+      { x: padding, y: baselineY },
+      { x: xs[0], y: baselineY },
+      { x: xs[1], y: plateauY },
+      { x: xs[2], y: plateauY },
+      { x: xs[3], y: baselineY },
+      { x: Math.min(xs[3] + 130, width - padding), y: baselineY }
+    ];
+    strokeMetallicConduit(ctx, points, dark);
+    drawVerticalMeasure(ctx, Math.min(xs[3] + 42, width - padding - 10), plateauY, baselineY, 'Offset height ' + fmt(result.metrics.obstructionHeight, common.rounding), dark);
+    drawAngleCallout(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 36, padding + 8, width - padding - 112), 112, dark);
+    drawAngleCallout(ctx, xs[1], plateauY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 32, padding + 8, width - padding - 112), 78, dark);
+    drawAngleCallout(ctx, xs[2], plateauY - 8, fmtAngle(result.angles[2]), clamp(xs[2] - 16, padding + 8, width - padding - 112), 118, dark);
+    drawAngleCallout(ctx, xs[3] - 8, baselineY - 6, fmtAngle(result.angles[3]), clamp(xs[3] - 44, padding + 8, width - padding - 112), 112, dark);
     return;
   }
 
   if (result.bendType === 'kick' && xs.length >= 1) {
     const riseY = baselineY - 82;
     const runEnd = Math.min(xs[0] + 170, width - padding);
-    ctx.lineTo(xs[0], baselineY);
-    ctx.lineTo(runEnd, riseY);
-    ctx.stroke();
-
-    drawVerticalMeasure(ctx, Math.min(runEnd - 12, width - padding - 6), riseY, baselineY, 'Rise ' + fmt(result.metrics.rise, common.rounding));
-    drawAngleCallout(ctx, xs[0] + 18, baselineY - 8, fmtAngle(result.angles[0]), clamp(xs[0] - 18, padding + 8, width - padding - 112), 86);
+    points = [{ x: padding, y: baselineY }, { x: xs[0], y: baselineY }, { x: runEnd, y: riseY }];
+    strokeMetallicConduit(ctx, points, dark);
+    drawVerticalMeasure(ctx, Math.min(runEnd - 12, width - padding - 6), riseY, baselineY, 'Rise ' + fmt(result.metrics.rise, common.rounding), dark);
+    drawAngleCallout(ctx, xs[0] + 18, baselineY - 8, fmtAngle(result.angles[0]), clamp(xs[0] - 18, padding + 8, width - padding - 112), 86, dark);
     return;
   }
 
-  ctx.lineTo(defaultRunEnd, baselineY);
-  ctx.stroke();
+  points = [{ x: padding, y: baselineY }, { x: defaultRunEnd, y: baselineY }];
+  strokeMetallicConduit(ctx, points, dark);
 }
 
-function drawVerticalMeasure(ctx, x, topY, bottomY, label) {
+function drawVerticalMeasure(ctx, x, topY, bottomY, label, dark) {
   const midY = (topY + bottomY) / 2;
   ctx.font = '14px Arial';
 
@@ -2436,16 +2344,15 @@ function drawVerticalMeasure(ctx, x, topY, bottomY, label) {
   ctx.lineTo(x + 10, bottomY);
   ctx.stroke();
 
-  ctx.fillStyle = '#fff1e2';
+  ctx.fillStyle = dark ? '#1f2937' : '#fff1e2';
   ctx.fillRect(x + 12, midY - 16, Math.max(ctx.measureText(label).width + 14, 120), 28);
-  ctx.strokeStyle = '#f3c18e';
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.14)' : '#f3c18e';
   ctx.strokeRect(x + 12, midY - 16, Math.max(ctx.measureText(label).width + 14, 120), 28);
-  ctx.fillStyle = '#8a3f00';
-  ctx.font = '14px Arial';
+  ctx.fillStyle = dark ? '#f8fafc' : '#8a3f00';
   ctx.fillText(label, x + 20, midY + 4);
 }
 
-function drawHorizontalMeasure(ctx, x1, x2, y, label) {
+function drawHorizontalMeasure(ctx, x1, x2, y, label, dark) {
   const left = Math.min(x1, x2);
   const right = Math.max(x1, x2);
   const center = (left + right) / 2;
@@ -2463,16 +2370,15 @@ function drawHorizontalMeasure(ctx, x1, x2, y, label) {
   ctx.lineTo(right, y + 8);
   ctx.stroke();
 
-  ctx.fillStyle = '#fff1e2';
+  ctx.fillStyle = dark ? '#1f2937' : '#fff1e2';
   ctx.fillRect(center - labelWidth / 2, y - 34, labelWidth, 24);
-  ctx.strokeStyle = '#f3c18e';
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.14)' : '#f3c18e';
   ctx.strokeRect(center - labelWidth / 2, y - 34, labelWidth, 24);
-  ctx.fillStyle = '#8a3f00';
-  ctx.font = '14px Arial';
+  ctx.fillStyle = dark ? '#f8fafc' : '#8a3f00';
   ctx.fillText(label, center - labelWidth / 2 + 10, y - 17);
 }
 
-function drawAngleCallout(ctx, anchorX, anchorY, label, boxX, boxY) {
+function drawAngleCallout(ctx, anchorX, anchorY, label, boxX, boxY, dark) {
   ctx.save();
   ctx.font = 'bold 13px Arial';
   const boxWidth = Math.max(ctx.measureText(label).width + 20, 54);
@@ -2481,7 +2387,7 @@ function drawAngleCallout(ctx, anchorX, anchorY, label, boxX, boxY) {
   const targetY = boxY + boxHeight;
 
   ctx.setLineDash([4, 5]);
-  ctx.strokeStyle = 'rgba(194, 65, 12, 0.7)';
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.45)' : 'rgba(194, 65, 12, 0.7)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.moveTo(targetX, targetY);
@@ -2489,14 +2395,14 @@ function drawAngleCallout(ctx, anchorX, anchorY, label, boxX, boxY) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  ctx.fillStyle = '#fff7ed';
+  ctx.fillStyle = dark ? '#1f2937' : '#fff7ed';
   roundRect(ctx, boxX, boxY, boxWidth, boxHeight, 10);
   ctx.fill();
   ctx.strokeStyle = '#fb923c';
   ctx.lineWidth = 1.25;
   ctx.stroke();
 
-  ctx.fillStyle = '#9a3412';
+  ctx.fillStyle = dark ? '#f8fafc' : '#9a3412';
   ctx.fillText(label, boxX + 10, boxY + 17);
   ctx.restore();
 }
@@ -2524,31 +2430,21 @@ function oppositeReferenceEnd(referenceEnd) {
   return referenceEnd === 'far' ? 'near' : 'far';
 }
 
-function fmt(value, rounding) {
-  if (!Number.isFinite(value)) {
-    return 'n/a';
-  }
+function fmt(value) {
+  if (!Number.isFinite(value)) return 'n/a';
   return toNearestSixteenth(value);
 }
 
 function fmtAngle(value) {
-  if (!Number.isFinite(value)) {
-    return 'n/a';
-  }
+  if (!Number.isFinite(value)) return 'n/a';
   const rounded = Math.round(value * 100) / 100;
   return (Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')) + '°';
 }
 
-function formatValue(value, rounding) {
-  if (typeof value === 'number') {
-    return fmt(value, rounding);
-  }
-  if (Array.isArray(value)) {
-    return value.map(function (item) { return formatValue(item, rounding); }).join(', ');
-  }
-  if (value === null || value === undefined || value === '') {
-    return 'n/a';
-  }
+function formatValue(value) {
+  if (typeof value === 'number') return fmt(value);
+  if (Array.isArray(value)) return value.map(function (item) { return formatValue(item); }).join(', ');
+  if (value === null || value === undefined || value === '') return 'n/a';
   return String(value);
 }
 
@@ -2565,18 +2461,13 @@ function toNearestSixteenth(value) {
     sixteenths = 0;
   }
 
-  if (sixteenths === 0) {
-    return sign + whole + ' in';
-  }
+  if (sixteenths === 0) return sign + whole + ' in';
 
   const divisor = gcd(sixteenths, 16);
   const num = sixteenths / divisor;
   const den = 16 / divisor;
 
-  if (whole === 0) {
-    return sign + num + '/' + den + ' in';
-  }
-
+  if (whole === 0) return sign + num + '/' + den + ' in';
   return sign + whole + ' ' + num + '/' + den + ' in';
 }
 
@@ -2584,16 +2475,8 @@ function gcd(a, b) {
   return b ? gcd(b, a % b) : a;
 }
 
-function roundNumber(value, digits) {
-  const precision = typeof digits === 'number' ? digits : 2;
-  const factor = Math.pow(10, precision);
-  return Math.round(value * factor) / factor;
-}
-
 function parseNumber(value) {
-  if (value === '' || value === null || value === undefined) {
-    return null;
-  }
+  if (value === '' || value === null || value === undefined) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -2601,15 +2484,8 @@ function parseNumber(value) {
 function parseRequired(id, label) {
   const node = document.getElementById(id);
   const value = parseNumber(node ? node.value : null);
-  if (value === null) {
-    addMessage('error', label + ' is required.');
-  }
+  if (value === null) addMessage('error', label + ' is required.');
   return value;
-}
-
-function parseOptional(id) {
-  const node = document.getElementById(id);
-  return node ? parseNumber(node.value) : null;
 }
 
 function addMessage(type, text) {
@@ -2623,89 +2499,8 @@ function clearMessages() {
   el.messages.innerHTML = '';
 }
 
-function syncDataEditor() {
-  el.dataEditor.value = JSON.stringify(state.data, null, 2);
-}
-
-function saveDataEditor() {
-  try {
-    const parsed = stripUnsupportedSizes(JSON.parse(el.dataEditor.value));
-    validateDataShape(parsed);
-    state.data = parsed;
-    localStorage.setItem('conduitBenderData', JSON.stringify(parsed));
-    populateConduitTypes();
-    renderDynamicFields();
-    addMessage('info', 'Conduit / bender data saved to localStorage.');
-  } catch (error) {
-    addMessage('error', 'Could not save data: ' + error.message);
-  }
-}
-
-function loadSavedData() {
-  try {
-    const raw = localStorage.getItem('conduitBenderData');
-    if (!raw) {
-      return null;
-    }
-    const parsed = stripUnsupportedSizes(JSON.parse(raw));
-    validateDataShape(parsed);
-    return parsed;
-  } catch (error) {
-    addMessage('warn', 'Saved data could not be loaded. Defaults were used instead.');
-    return null;
-  }
-}
-
-function loadSavedIntoEditor() {
-  const saved = loadSavedData();
-  if (!saved) {
-    addMessage('warn', 'No saved conduit/bender data found in localStorage.');
-    return;
-  }
-  state.data = saved;
-  syncDataEditor();
-  populateConduitTypes();
-  renderDynamicFields();
-  addMessage('info', 'Loaded saved conduit/bender data into the editor.');
-}
-
-function validateDataShape(data) {
-  if (!data || typeof data !== 'object' || !data.conduitTypes) {
-    throw new Error('Data must contain a conduitTypes object.');
-  }
-}
-
-function resetForm() {
-  el.calculatorForm.reset();
-  clearMessages();
-  populateConduitTypes();
-  renderDynamicFields();
-  state.lastResult = null;
-  el.resultSummary.textContent = 'Enter values and calculate.';
-  el.resultSummary.classList.add('empty');
-  applyViewMode(loadViewMode());
-  drawPlaceholder();
-}
-
-async function copyResult() {
-  if (!state.lastResult) {
-    addMessage('warn', 'Nothing to copy yet.');
-    return;
-  }
-
-  const text = el.resultSummary.innerText;
-  try {
-    await navigator.clipboard.writeText(text);
-    addMessage('info', 'Result copied to clipboard.');
-  } catch (error) {
-    addMessage('error', 'Could not copy result to clipboard.');
-  }
-}
-
 function toDisplayKey(key) {
-  return key
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, function (letter) { return letter.toUpperCase(); });
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, function (letter) { return letter.toUpperCase(); });
 }
 
 function escapeHtml(str) {
