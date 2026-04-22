@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Conduit Bending Calculator - ITool B2</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-block">
+      <div class="eyebrow-row">
+        <span class="eyebrow-pill">ITool B2-ready</span>
+        <span class="eyebrow-pill soft">120 in stock conduit</span>
+        <span class="eyebrow-pill soft">Nearest 1/16&quot; output</span>
+      </div>
+      <h1>Conduit Bending Calculator</h1>
+      <p class="subtitle">A polished local bending calculator with editable bender data, fixed 10-foot stock length, and field-friendly diagrams.</p>
+    </div>
+    <div class="header-actions">
+      <button id="printBtn" class="secondary" type="button">Print</button>
+      <button id="copyBtn" class="secondary" type="button">Copy Result</button>
+      <button id="resetBtn" class="danger" type="button">Reset</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel form-panel">
+      <h2>Calculator</h2>
+      <p class="section-subtitle">Choose your conduit, bend type, and field dimensions. All displayed values round to the nearest 1/16 inch.</p>
+
+      <div id="messages"></div>
+
+      <form id="calculatorForm" novalidate>
+        <div class="grid two">
+          <label>
+            <span>Conduit type / material</span>
+            <select id="conduitType" required></select>
+          </label>
+          <label>
+            <span>Nominal size</span>
+            <select id="conduitSize" required></select>
+          </label>
+        </div>
+
+        <div class="grid two">
+          <label>
+            <span>Bender profile</span>
+            <select id="benderProfile"></select>
+          </label>
+          <label>
+            <span>Bend type</span>
+            <select id="bendType" required>
+              <option value="stub90">90° stub-up</option>
+              <option value="offset">Offset bend</option>
+              <option value="backToBack90">Back-to-back 90</option>
+              <option value="saddle3">3-point saddle</option>
+              <option value="saddle4">4-point saddle</option>
+              <option value="kick">Kick bend</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="grid two compact-row">
+          <label>
+            <span>Measurement reference end</span>
+            <select id="referenceEnd">
+              <option value="near">From near end (End A)</option>
+              <option value="far">From far end (End B)</option>
+            </select>
+          </label>
+          <div class="output-mode-card" aria-live="polite">
+            <span class="output-mode-label">Output rounding</span>
+            <strong>Always fractions to nearest 1/16&quot;</strong>
+            <span class="small">Decimals are no longer shown in the result panel.</span>
+          </div>
+        </div>
+
+        <div class="stock-length-note">Fixed stock conduit length: <strong>120 inches (10 ft)</strong></div>
+
+        <section class="fieldset" id="dynamicFields"></section>
+
+        <div class="actions-row">
+          <button type="submit" class="primary">Calculate</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel result-panel">
+      <h2>Result</h2>
+      <p class="section-subtitle">Marks, bend spacing, and plain-English instructions update after each calculation.</p>
+      <div id="resultSummary" class="result-summary empty">Enter values and calculate. The result panel will show marks and instructions rounded to the nearest 1/16 inch.</div>
+      <canvas id="diagramCanvas" width="900" height="420" aria-label="Bend diagram"></canvas>
+    </section>
+
+    <section class="panel data-panel">
+      <h2>Editable conduit / bender data</h2>
+      <p class="section-subtitle">Profiles stay editable so take-up, gain, radius, and special field notes can match your actual bender.</p>
+      <p class="note">Values such as take-up, gain, hook marks, bend radius, and offsets are editable. Verify them against your actual bender chart before field use.</p>
+      <div class="data-actions">
+        <button id="loadDefaultsBtn" class="secondary" type="button">Load defaults</button>
+        <button id="saveDataBtn" class="primary" type="button">Save to localStorage</button>
+        <button id="loadSavedBtn" class="secondary" type="button">Load saved</button>
+      </div>
+      <textarea id="dataEditor" spellcheck="false"></textarea>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
