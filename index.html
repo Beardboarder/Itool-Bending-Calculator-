@@ -8,6 +8,12 @@
 </head>
 <body>
   <header class="app-header">
+    <div class="header-left-tools">
+      <div class="view-mode-toggle" role="group" aria-label="Layout mode">
+        <button id="desktopModeBtn" class="secondary mode-btn active" type="button" data-view-mode="desktop" aria-pressed="true">Desktop</button>
+        <button id="mobileModeBtn" class="secondary mode-btn" type="button" data-view-mode="mobile" aria-pressed="false">Mobile</button>
+      </div>
+    </div>
     <div class="brand-block">
       <div class="eyebrow-row">
         <span class="eyebrow-pill">ITool B2-ready</span>
@@ -18,6 +24,7 @@
       <p class="subtitle">A polished local bending calculator with editable bender data, fixed 10-foot stock length, and field-friendly diagrams.</p>
     </div>
     <div class="header-actions">
+      <button id="settingsBtn" class="secondary settings-btn" type="button" aria-expanded="false" aria-controls="dataPanel">Settings</button>
       <button id="printBtn" class="secondary" type="button">Print</button>
       <button id="copyBtn" class="secondary" type="button">Copy Result</button>
       <button id="resetBtn" class="danger" type="button">Reset</button>
@@ -94,7 +101,7 @@
       <canvas id="diagramCanvas" width="1200" height="600" aria-label="Bend diagram"></canvas>
     </section>
 
-    <section class="panel data-panel">
+    <section class="panel data-panel is-collapsed" id="dataPanel" hidden>
       <h2>Editable conduit / bender data</h2>
       <p class="section-subtitle">Profiles stay editable so take-up, gain, radius, and special field notes can match your actual bender.</p>
       <p class="note">Values such as take-up, gain, hook marks, bend radius, and offsets are editable. Verify them against your actual bender chart before field use.</p>

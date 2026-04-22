@@ -1190,7 +1190,11 @@ const el = {
   resultSummary: document.getElementById('resultSummary'),
   diagramCanvas: document.getElementById('diagramCanvas'),
   dataEditor: document.getElementById('dataEditor'),
-  calculatorForm: document.getElementById('calculatorForm')
+  calculatorForm: document.getElementById('calculatorForm'),
+  dataPanel: document.getElementById('dataPanel'),
+  settingsBtn: document.getElementById('settingsBtn'),
+  desktopModeBtn: document.getElementById('desktopModeBtn'),
+  mobileModeBtn: document.getElementById('mobileModeBtn')
 };
 
 function cloneData(value) {
@@ -1207,6 +1211,7 @@ function initializeApp() {
   renderBendTypeButtons();
   attachEvents();
   renderDynamicFields();
+  applyViewMode(loadViewMode());
   drawPlaceholder();
 }
 
@@ -1287,6 +1292,17 @@ function attachEvents() {
     calculateAndRender();
   });
 
+  if (el.settingsBtn) {
+    el.settingsBtn.addEventListener('click', toggleSettingsPanel);
+  }
+
+  if (el.desktopModeBtn) {
+    el.desktopModeBtn.addEventListener('click', function () { applyViewMode('desktop'); });
+  }
+  if (el.mobileModeBtn) {
+    el.mobileModeBtn.addEventListener('click', function () { applyViewMode('mobile'); });
+  }
+
   document.getElementById('resetBtn').addEventListener('click', resetForm);
   document.getElementById('copyBtn').addEventListener('click', copyResult);
   document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
@@ -1299,6 +1315,59 @@ function attachEvents() {
     renderDynamicFields();
     addMessage('info', 'Loaded editable default conduit/bender data into the editor.');
   });
+}
+
+
+
+function loadViewMode() {
+  try {
+    return localStorage.getItem('cbc-view-mode') || 'desktop';
+  } catch (error) {
+    return 'desktop';
+  }
+}
+
+function saveViewMode(mode) {
+  try {
+    localStorage.setItem('cbc-view-mode', mode);
+  } catch (error) {}
+}
+
+function applyViewMode(mode) {
+  const safeMode = mode === 'mobile' ? 'mobile' : 'desktop';
+  document.body.setAttribute('data-view-mode', safeMode);
+  if (el.desktopModeBtn) {
+    const desktopActive = safeMode === 'desktop';
+    el.desktopModeBtn.classList.toggle('active', desktopActive);
+    el.desktopModeBtn.setAttribute('aria-pressed', desktopActive ? 'true' : 'false');
+  }
+  if (el.mobileModeBtn) {
+    const mobileActive = safeMode === 'mobile';
+    el.mobileModeBtn.classList.toggle('active', mobileActive);
+    el.mobileModeBtn.setAttribute('aria-pressed', mobileActive ? 'true' : 'false');
+  }
+  saveViewMode(safeMode);
+  window.requestAnimationFrame(function () {
+    if (state.lastResult && state.lastCommon && state.lastSelection) {
+      drawDiagram(state.lastResult, state.lastCommon, state.lastSelection);
+    } else {
+      drawPlaceholder();
+    }
+  });
+}
+
+function toggleSettingsPanel() {
+  if (!el.dataPanel || !el.settingsBtn) return;
+  const willOpen = el.dataPanel.hasAttribute('hidden');
+  if (willOpen) {
+    el.dataPanel.removeAttribute('hidden');
+    el.dataPanel.classList.remove('is-collapsed');
+  } else {
+    el.dataPanel.setAttribute('hidden', 'hidden');
+    el.dataPanel.classList.add('is-collapsed');
+  }
+  el.settingsBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  el.settingsBtn.textContent = willOpen ? 'Close Settings' : 'Settings';
 }
 
 function stripUnsupportedSizes(data) {
@@ -1455,7 +1524,7 @@ function renderDynamicFields() {
       '<div class="dynamic-stack">',
       sliderFieldHtml('offsetReferenceDistance', 'Distance to object / start point from ' + selectedReference, { min: 0, max: 120, value: saved.offsetReferenceDistance || 24 }),
       sliderFieldHtml('offsetHeight', 'Offset height', { min: 0, max: 36, value: saved.offsetHeight || 6 }),
-      angleButtonsHtml('offsetAnglePreset', 'Angle of bends', saved.offsetAnglePreset || 30, [10, 22.5, 30, 45, 60], true),
+      angleButtonsHtml('offsetAnglePreset', 'Angle of bends', saved.offsetAnglePreset || 30, [10, 15, 22.5, 30, 45, 60], true),
       '<label><span>Optional shrink override (inches)</span><input id="offsetShrinkOverride" type="number" min="0" step="0.0625" placeholder="Geometry used by default" value="' + escapeHtml(saved.offsetShrinkOverride || '') + '"></label>',
       '<div class="hint-card"><strong>Offset note:</strong> spacing uses universal geometry; profile data still controls take-up, radius, and ITool B2 values.</div>',
       '</div>'
@@ -1495,7 +1564,7 @@ function renderDynamicFields() {
       '<div class="dynamic-stack">',
       sliderFieldHtml('s4NearEdgeDistance', 'Distance to near edge from ' + selectedReference, { min: 0, max: 120, value: saved.s4NearEdgeDistance || 24 }),
       '<div class="field-inline-grid">' + sliderFieldHtml('s4Height', 'Obstruction height', { min: 0, max: 24, value: saved.s4Height || 4 }) + sliderFieldHtml('s4Width', 'Obstruction width', { min: 0, max: 36, value: saved.s4Width || 8 }) + '</div>',
-      angleButtonsHtml('s4Angle', 'Angle of bends', saved.s4Angle || 30, [10, 22.5, 30, 45, 60], true),
+      angleButtonsHtml('s4Angle', 'Angle of bends', saved.s4Angle || 30, [10, 15, 22.5, 30, 45, 60], true),
       '<label><span>Optional shrink override (inches)</span><input id="s4ShrinkOverride" type="number" min="0" step="0.0625" placeholder="Geometry used by default" value="' + escapeHtml(saved.s4ShrinkOverride || '') + '"></label>',
       '</div>'
     ].join(''),
@@ -1578,6 +1647,9 @@ function calculateAndRender() {
 
   state.lastResult = result;
   renderResult(result, common, selection);
+  state.lastResult = result;
+  state.lastCommon = common;
+  state.lastSelection = selection;
   drawDiagram(result, common, selection);
 }
 
@@ -2137,19 +2209,36 @@ function renderResult(result, common, selection) {
   ].join('');
 }
 
+function resizeCanvasForViewMode() {
+  const canvas = el.diagramCanvas;
+  if (!canvas) return;
+  const mobileMode = document.body.getAttribute('data-view-mode') === 'mobile';
+  if (mobileMode) {
+    canvas.width = 900;
+    canvas.height = 1950;
+  } else {
+    canvas.width = 1200;
+    canvas.height = 600;
+  }
+}
+
 function drawPlaceholder() {
+  resizeCanvasForViewMode();
   const ctx = el.diagramCanvas.getContext('2d');
   ctx.clearRect(0, 0, el.diagramCanvas.width, el.diagramCanvas.height);
   ctx.fillStyle = '#fffdf9';
   ctx.fillRect(0, 0, el.diagramCanvas.width, el.diagramCanvas.height);
+  const mobileMode = document.body.getAttribute('data-view-mode') === 'mobile';
   ctx.fillStyle = '#8a3f00';
-  ctx.font = '24px Arial';
-  ctx.fillText('Bend diagram and labeled dimensions will appear here after calculation.', 32, 60);
-  ctx.font = '18px Arial';
-  ctx.fillText('Fixed stock conduit length: 120 in. Diagrams label marks, heights, and bend angles.', 32, 96);
+  ctx.font = mobileMode ? '40px Arial' : '24px Arial';
+  ctx.fillText('Bend diagram and labeled dimensions will appear here after calculation.', 32, mobileMode ? 90 : 60);
+  ctx.font = mobileMode ? '28px Arial' : '18px Arial';
+  ctx.fillText('Fixed stock conduit length: 120 in. Diagrams label marks, heights, and bend angles.', 32, mobileMode ? 140 : 96);
 }
 
+
 function drawDiagram(result, common, selection) {
+  resizeCanvasForViewMode();
   const marks = normalizeMarks(result, common);
   const canvas = el.diagramCanvas;
   const ctx = canvas.getContext('2d');
@@ -2248,8 +2337,8 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
     ctx.lineTo(x, topY);
     ctx.stroke();
 
-    drawVerticalMeasure(ctx, Math.min(x + 40, width - padding + 10), topY, baselineY, 'Stub height ' + fmt(result.metrics.stubLength, common.rounding));
-    drawAngleBadge(ctx, Math.min(x + 14, width - 80), topY + 18, fmtAngle(90));
+    drawVerticalMeasure(ctx, Math.min(x + 46, width - padding + 10), topY, baselineY, 'Stub height ' + fmt(result.metrics.stubLength, common.rounding));
+    drawAngleCallout(ctx, x, topY + 6, fmtAngle(90), clamp(x + 18, padding + 20, width - padding - 112), 78);
     return;
   }
 
@@ -2261,9 +2350,9 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
     ctx.lineTo(runEnd, riseY);
     ctx.stroke();
 
-    drawVerticalMeasure(ctx, Math.min(runEnd + 14, width - padding + 12), riseY, baselineY, 'Offset height ' + fmt(result.metrics.offsetHeight, common.rounding));
-    drawAngleBadge(ctx, xs[0] + 16, baselineY - 28, fmtAngle(result.angles[0]));
-    drawAngleBadge(ctx, xs[1] - 10, riseY - 26, fmtAngle(result.angles[1]));
+    drawVerticalMeasure(ctx, Math.min(runEnd - 12, width - padding - 6), riseY, baselineY, 'Offset height ' + fmt(result.metrics.offsetHeight, common.rounding));
+    drawAngleCallout(ctx, xs[0] + 10, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 34, padding + 8, width - padding - 112), 78);
+    drawAngleCallout(ctx, xs[1] - 8, riseY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 20, padding + 8, width - padding - 112), 118);
     return;
   }
 
@@ -2276,8 +2365,8 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
     ctx.lineTo(Math.min(xs[1] + 90, width - padding), baselineY);
     ctx.stroke();
 
-    drawAngleBadge(ctx, xs[0] + 16, topY + 18, '90°');
-    drawAngleBadge(ctx, xs[1] - 10, topY + 18, '90°');
+    drawAngleCallout(ctx, xs[0], topY + 8, '90°', clamp(xs[0] - 24, padding + 8, width - padding - 112), 84);
+    drawAngleCallout(ctx, xs[1], topY + 8, '90°', clamp(xs[1] - 24, padding + 8, width - padding - 112), 84);
     drawHorizontalMeasure(ctx, xs[0], xs[1], topY - 28, result.metrics.distanceBetween90s
       ? 'Bend-to-bend ' + fmt(result.metrics.distanceBetween90s, common.rounding)
       : 'Center section');
@@ -2292,10 +2381,10 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
     ctx.lineTo(Math.min(xs[2] + 150, width - padding), baselineY);
     ctx.stroke();
 
-    drawVerticalMeasure(ctx, xs[1] + 46, peakY, baselineY, 'Saddle height ' + fmt(result.metrics.obstructionHeight, common.rounding));
-    drawAngleBadge(ctx, xs[0] + 14, baselineY - 26, fmtAngle(result.angles[0]));
-    drawAngleBadge(ctx, xs[1] - 14, peakY - 28, fmtAngle(result.angles[1]));
-    drawAngleBadge(ctx, xs[2] - 6, baselineY - 26, fmtAngle(result.angles[2]));
+    drawVerticalMeasure(ctx, xs[1] + 52, peakY, baselineY, 'Saddle height ' + fmt(result.metrics.obstructionHeight, common.rounding));
+    drawAngleCallout(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 34, padding + 8, width - padding - 112), 108);
+    drawAngleCallout(ctx, xs[1], peakY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 24, padding + 8, width - padding - 112), 78);
+    drawAngleCallout(ctx, xs[2] - 8, baselineY - 6, fmtAngle(result.angles[2]), clamp(xs[2] - 40, padding + 8, width - padding - 112), 108);
     return;
   }
 
@@ -2308,11 +2397,11 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
     ctx.lineTo(Math.min(xs[3] + 130, width - padding), baselineY);
     ctx.stroke();
 
-    drawVerticalMeasure(ctx, xs[2] + 42, plateauY, baselineY, 'Offset height ' + fmt(result.metrics.obstructionHeight, common.rounding));
-    drawAngleBadge(ctx, xs[0] + 16, baselineY - 24, fmtAngle(result.angles[0]));
-    drawAngleBadge(ctx, xs[1] - 8, plateauY - 24, fmtAngle(result.angles[1]));
-    drawAngleBadge(ctx, xs[2] - 8, plateauY - 24, fmtAngle(result.angles[2]));
-    drawAngleBadge(ctx, xs[3] - 8, baselineY - 24, fmtAngle(result.angles[3]));
+    drawVerticalMeasure(ctx, Math.min(xs[3] + 42, width - padding - 10), plateauY, baselineY, 'Offset height ' + fmt(result.metrics.obstructionHeight, common.rounding));
+    drawAngleCallout(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 36, padding + 8, width - padding - 112), 112);
+    drawAngleCallout(ctx, xs[1], plateauY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 32, padding + 8, width - padding - 112), 78);
+    drawAngleCallout(ctx, xs[2], plateauY - 8, fmtAngle(result.angles[2]), clamp(xs[2] - 16, padding + 8, width - padding - 112), 118);
+    drawAngleCallout(ctx, xs[3] - 8, baselineY - 6, fmtAngle(result.angles[3]), clamp(xs[3] - 44, padding + 8, width - padding - 112), 112);
     return;
   }
 
@@ -2323,8 +2412,8 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
     ctx.lineTo(runEnd, riseY);
     ctx.stroke();
 
-    drawVerticalMeasure(ctx, Math.min(runEnd + 14, width - padding + 12), riseY, baselineY, 'Rise ' + fmt(result.metrics.rise, common.rounding));
-    drawAngleBadge(ctx, xs[0] + 32, baselineY - 30, fmtAngle(result.angles[0]));
+    drawVerticalMeasure(ctx, Math.min(runEnd - 12, width - padding - 6), riseY, baselineY, 'Rise ' + fmt(result.metrics.rise, common.rounding));
+    drawAngleCallout(ctx, xs[0] + 18, baselineY - 8, fmtAngle(result.angles[0]), clamp(xs[0] - 18, padding + 8, width - padding - 112), 86);
     return;
   }
 
@@ -2383,19 +2472,48 @@ function drawHorizontalMeasure(ctx, x1, x2, y, label) {
   ctx.fillText(label, center - labelWidth / 2 + 10, y - 17);
 }
 
-function drawAngleBadge(ctx, x, y, label) {
+function drawAngleCallout(ctx, anchorX, anchorY, label, boxX, boxY) {
+  ctx.save();
   ctx.font = 'bold 13px Arial';
-  const width = Math.max(ctx.measureText(label).width + 16, 44);
-  const height = 24;
+  const boxWidth = Math.max(ctx.measureText(label).width + 20, 54);
+  const boxHeight = 26;
+  const targetX = boxX + boxWidth / 2;
+  const targetY = boxY + boxHeight;
 
-  ctx.fillStyle = '#ffedd5';
-  ctx.fillRect(x, y, width, height);
-  ctx.strokeStyle = '#fb923c';
+  ctx.setLineDash([4, 5]);
+  ctx.strokeStyle = 'rgba(194, 65, 12, 0.7)';
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(x, y, width, height);
+  ctx.beginPath();
+  ctx.moveTo(targetX, targetY);
+  ctx.lineTo(anchorX, anchorY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = '#fff7ed';
+  roundRect(ctx, boxX, boxY, boxWidth, boxHeight, 10);
+  ctx.fill();
+  ctx.strokeStyle = '#fb923c';
+  ctx.lineWidth = 1.25;
+  ctx.stroke();
+
   ctx.fillStyle = '#9a3412';
-  ctx.font = 'bold 13px Arial';
-  ctx.fillText(label, x + 8, y + 16);
+  ctx.fillText(label, boxX + 10, boxY + 17);
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function referenceLabel(referenceEnd) {
@@ -2565,6 +2683,7 @@ function resetForm() {
   state.lastResult = null;
   el.resultSummary.textContent = 'Enter values and calculate.';
   el.resultSummary.classList.add('empty');
+  applyViewMode(loadViewMode());
   drawPlaceholder();
 }
 
