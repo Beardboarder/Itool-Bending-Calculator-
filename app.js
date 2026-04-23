@@ -1168,7 +1168,8 @@ const BEND_LABELS = {
   backToBack90: 'Back-to-back 90',
   saddle3: '3-point saddle',
   saddle4: '4-point saddle',
-  kick: 'Kick bend'
+  kick: 'Kick bend',
+  segment90: 'Segment 90° bend'
 };
 
 const STOCK_LENGTH_INCHES = 120;
@@ -1251,6 +1252,23 @@ function attachEvents() {
       const custom = document.getElementById(angleButton.dataset.angleTarget + 'Custom');
       if (custom) custom.value = '';
       syncDynamicUi();
+      return;
+    }
+
+    const sliderNudgeButton = event.target.closest('[data-target-slider]');
+    if (sliderNudgeButton) {
+      const target = document.getElementById(sliderNudgeButton.dataset.targetSlider);
+      if (!target) return;
+
+      const amount = parseNumber(sliderNudgeButton.dataset.nudgeAmount) || 0;
+      const direction = sliderNudgeButton.dataset.sliderNudge === '-' ? -1 : 1;
+      const currentValue = parseNumber(target.value) || 0;
+      const min = parseNumber(target.min);
+      const max = parseNumber(target.max);
+      const nextValue = clamp(currentValue + (direction * amount), min !== null ? min : currentValue, max !== null ? max : currentValue);
+
+      target.value = String(nextValue);
+      updateSliderDisplay(target);
       return;
     }
   });
@@ -1425,7 +1443,8 @@ function renderBendTypeButtons() {
     offset: '╱',
     saddle3: '∧',
     saddle4: '⌒',
-    kick: '⤴'
+    kick: '⤴',
+    segment90: '◜'
   };
 
   el.bendTypeButtons.innerHTML = Object.keys(BEND_LABELS).map(function (key) {
@@ -1441,8 +1460,9 @@ function sliderFieldHtml(id, label, options) {
   const value = options.value !== undefined ? options.value : min;
   const display = options.display || toNearestSixteenth(Number(value));
   const unit = options.unit || 'in';
+  const nudge = options.nudge !== undefined ? options.nudge : (unit === 'deg' ? 1 : 0.25);
 
-  return '<label class="slider-field"><span class="slider-top"><span>' + escapeHtml(label) + '</span><strong data-slider-display-for="' + id + '">' + escapeHtml(display) + '</strong></span><input id="' + id + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '" data-unit="' + unit + '"><span class="slider-minmax"><span>' + escapeHtml(toNearestSixteenth(min)) + '</span><span>' + escapeHtml(toNearestSixteenth(max)) + '</span></span></label>';
+  return '<label class="slider-field"><span class="slider-top"><span>' + escapeHtml(label) + '</span><strong data-slider-display-for="' + id + '">' + escapeHtml(display) + '</strong></span><div class="slider-control-row"><button type="button" class="slider-nudge-btn" data-slider-nudge="-" data-target-slider="' + id + '" data-nudge-amount="' + nudge + '" aria-label="Decrease ' + escapeHtml(label) + '">−</button><input id="' + id + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '" data-unit="' + unit + '"><button type="button" class="slider-nudge-btn" data-slider-nudge="+" data-target-slider="' + id + '" data-nudge-amount="' + nudge + '" aria-label="Increase ' + escapeHtml(label) + '">+</button></div><span class="slider-minmax"><span>' + escapeHtml(toNearestSixteenth(min)) + '</span><span>' + escapeHtml(toNearestSixteenth(max)) + '</span></span></label>';
 }
 
 function angleButtonsHtml(id, label, active, values, allowCustom) {
@@ -1574,6 +1594,16 @@ function renderDynamicFields() {
       angleButtonsHtml('kickAngle', 'Kick angle', saved.kickAngle || 15, [10, 15, 22.5, 30, 45, 60], true),
       '<div class="field-inline-grid">' + sliderFieldHtml('kickRise', 'Rise', { min: 0, max: 24, value: saved.kickRise || 3 }) + sliderFieldHtml('kickDistanceToBend', 'Distance to bend / tangent point from ' + selectedReference, { min: 0, max: 120, value: saved.kickDistanceToBend || 20 }) + '</div>',
       '</div>'
+    ].join(''),
+
+    segment90: [
+      '<h3>Segment 90° bend inputs</h3>',
+      '<p class="inline-note prominent">Choose the bend radius and shot pattern. Spacing uses the PDF method: developed length = 1.57 × radius, then spacing = developed length ÷ number of bends.</p>',
+      '<div class="dynamic-stack">',
+      sliderFieldHtml('segmentRadius', 'Radius of 90° bend', { min: 6, max: 60, value: saved.segmentRadius || 24 }),
+      '<label><span>Segment pattern</span><select id="segmentPattern"><option value="15x6"' + ((saved.segmentPattern || '15x6') === '15x6' ? ' selected' : '') + '>15 bends at 6° each</option><option value="18x5"' + ((saved.segmentPattern || '15x6') === '18x5' ? ' selected' : '') + '>18 bends at 5° each</option></select></label>',
+      '<div class="hint-card"><strong>Layout note:</strong> spacing is equal between bend marks. The first bend starts at the start mark you lay out on the conduit.</div>',
+      '</div>'
     ].join('')
   };
 
@@ -1614,6 +1644,9 @@ function calculateAndRender() {
         break;
       case 'kick':
         result = calculateKick(common, cfg);
+        break;
+      case 'segment90':
+        result = calculateSegment90(common, cfg);
         break;
       default:
         throw new Error('Unsupported bend type.');
@@ -1986,6 +2019,54 @@ function calculateKick(common, cfg) {
   };
 }
 
+function calculateSegment90(common, cfg) {
+  const radius = parseRequired('segmentRadius', 'Segment bend radius');
+  const pattern = document.getElementById('segmentPattern') ? document.getElementById('segmentPattern').value : '15x6';
+  const errors = [];
+  const warnings = [];
+
+  if (radius === null || radius <= 0) errors.push('Segment bend radius must be greater than zero.');
+
+  const patternData = pattern === '18x5'
+    ? { bends: 18, degreesPerBend: 5 }
+    : { bends: 15, degreesPerBend: 6 };
+
+  const developedLength = 1.57 * radius;
+  const spacingBetweenMarks = developedLength / patternData.bends;
+  const marks = [];
+  const instructions = [];
+
+  for (let i = 0; i < patternData.bends; i += 1) {
+    marks.push(makeMark('Mark ' + (i + 1), i * spacingBetweenMarks, common.referenceEnd));
+  }
+
+  warnings.push('These mark locations are measured from the start mark, not directly from the end of the conduit.');
+  warnings.push('To locate the actual start mark for a finished stub, you still need desired stub height and conduit outside diameter from the PDF method.');
+
+  instructions.push('Lay out your start mark first on the conduit.');
+  instructions.push('Make the first bend at the start mark.');
+  instructions.push('Place the remaining bend marks every ' + fmt(spacingBetweenMarks, common.rounding) + ' from the previous mark.');
+  instructions.push('Make ' + patternData.bends + ' bends at ' + fmtAngle(patternData.degreesPerBend) + ' each to complete the 90° segment bend.');
+
+  return {
+    bendType: 'segment90',
+    marks: marks,
+    spacing: [spacingBetweenMarks],
+    angles: Array(patternData.bends).fill(patternData.degreesPerBend),
+    metrics: {
+      radius: radius,
+      developedLength: developedLength,
+      numberOfBends: patternData.bends,
+      degreesPerBend: patternData.degreesPerBend,
+      spacingBetweenMarks: spacingBetweenMarks,
+      bendRadius: cfg.bendRadius
+    },
+    instructions: instructions,
+    warnings: warnings,
+    errors: errors
+  };
+}
+
 const universal = {
   degreesToRadians: function (deg) { return (deg * Math.PI) / 180; },
   offsetSpacing: function (offsetHeight, angleDeg) { return offsetHeight / Math.sin(this.degreesToRadians(angleDeg)); },
@@ -2041,23 +2122,25 @@ function normalizeMarks(result, common) {
 
 function renderResult(result, common, selection) {
   const marks = normalizeMarks(result, common);
-  const markLines = marks.map(function (mark) {
-    return mark.label + ': ' + fmt(mark.position, common.rounding) + ' from ' + referenceLabel(mark.referenceEnd);
-  }).join('\n');
+  const markLinesHtml = marks.length
+    ? marks.map(function (mark) {
+        return '<strong>' + escapeHtml(mark.label) + '</strong>: ' + escapeHtml(fmt(mark.position, common.rounding)) + ' from ' + escapeHtml(referenceLabel(mark.referenceEnd));
+      }).join('<br />')
+    : 'No marks calculated.';
 
-  const spacingLines = result.spacing && result.spacing.length
+  const spacingLinesHtml = result.spacing && result.spacing.length
     ? result.spacing.map(function (value, index) {
-        return 'Distance ' + (index + 1) + ': ' + formatValue(value, common.rounding);
-      }).join('\n')
+        return '<strong>Distance ' + (index + 1) + '</strong>: ' + escapeHtml(formatValue(value, common.rounding));
+      }).join('<br />')
     : 'Distance between bends: n/a';
 
-  const metricsLines = Object.keys(result.metrics || {}).map(function (key) {
-    return toDisplayKey(key) + ': ' + formatValue(result.metrics[key], common.rounding);
-  }).join('\n');
+  const metricsLinesHtml = Object.keys(result.metrics || {}).map(function (key) {
+    return '<strong>' + escapeHtml(toDisplayKey(key)) + '</strong>: ' + escapeHtml(formatValue(result.metrics[key], common.rounding));
+  }).join('<br />');
 
   el.resultSummary.classList.remove('empty');
   el.resultSummary.innerHTML = [
-    '<div class="eyebrow-row"><span class="eyebrow-pill">Rounded to nearest 1/16\\"</span><span class="eyebrow-pill soft">120 in stock conduit</span></div>',
+    '<div class="eyebrow-row"><span class="eyebrow-pill">Rounded to nearest 1/16\"</span><span class="eyebrow-pill soft">120 in stock conduit</span></div>',
     '<div class="kv">',
     '<div>Conduit</div><strong>' + escapeHtml(selection.size) + ' ' + escapeHtml(selection.conduitType) + '</strong>',
     '<div>Bender profile</div><strong>' + escapeHtml(selection.profileName) + '</strong>',
@@ -2066,11 +2149,11 @@ function renderResult(result, common, selection) {
     '<div>Stock conduit length</div><strong>' + escapeHtml(fmt(common.stockLength, common.rounding)) + '</strong>',
     '<div>Angles</div><strong>' + escapeHtml((result.angles || []).map(function (angle) { return fmtAngle(angle); }).join(', ')) + '</strong>',
     '</div>',
-    '<div><strong>Mark locations</strong>\n' + escapeHtml(markLines) + '</div>',
+    '<div><strong>Mark locations</strong><br />' + markLinesHtml + '</div>',
     '<br />',
-    '<div><strong>Spacing / layout</strong>\n' + escapeHtml(spacingLines) + '</div>',
+    '<div><strong>Spacing / layout</strong><br />' + spacingLinesHtml + '</div>',
     '<br />',
-    '<div><strong>Values used</strong>\n' + escapeHtml(metricsLines) + '</div>',
+    '<div><strong>Values used</strong><br />' + metricsLinesHtml + '</div>',
     '<div class="instructions"><strong>Step-by-step instructions</strong><ol>' + (result.instructions || []).map(function (line) {
       return '<li>' + escapeHtml(line) + '</li>';
     }).join('') + '</ol></div>'
@@ -2115,7 +2198,9 @@ function drawDiagram(result, common, selection) {
   const w = canvas.width;
   const h = canvas.height;
   const padding = 70;
-  const baselineY = h - 95;
+  const mobileMode = document.body.getAttribute('data-view-mode') === 'mobile';
+  const baselineY = Math.round(h * (mobileMode ? 0.74 : 0.74));
+  const headingY = baselineY - (mobileMode ? 122 : 94);
   const stockLength = common.stockLength || STOCK_LENGTH_INCHES;
   const scale = (w - padding * 2) / stockLength;
   const dark = document.body.getAttribute('data-theme') === 'dark';
@@ -2123,8 +2208,6 @@ function drawDiagram(result, common, selection) {
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = dark ? '#11161d' : '#fffdf9';
   ctx.fillRect(0, 0, w, h);
-
-  drawHorizontalMeasure(ctx, padding, w - padding, 64, '120 in stock conduit', dark);
 
   ctx.strokeStyle = dark ? 'rgba(255,255,255,0.12)' : '#f3c18e';
   ctx.lineWidth = 1;
@@ -2142,9 +2225,9 @@ function drawDiagram(result, common, selection) {
 
   ctx.fillStyle = dark ? '#f8fafc' : '#8a3f00';
   ctx.font = '18px Arial';
-  ctx.fillText(selection.size + ' ' + selection.conduitType + ' | ' + BEND_LABELS[result.bendType], padding, 40);
-  ctx.fillText('End A', padding - 8, baselineY + 62);
-  ctx.fillText('End B', w - padding - 48, baselineY + 62);
+  ctx.fillText(selection.size + ' ' + selection.conduitType + ' | ' + BEND_LABELS[result.bendType], padding, headingY);
+  ctx.fillText('End A', padding - 8, baselineY + 44);
+  ctx.fillText('End B', w - padding - 48, baselineY + 44);
 
   const plottedMarks = marks.map(function (mark, index) {
     const absolute = Number.isFinite(mark.absolutePosition) ? mark.absolutePosition : absoluteMarkPosition(mark, stockLength);
@@ -2154,19 +2237,19 @@ function drawDiagram(result, common, selection) {
     ctx.strokeStyle = '#ea580c';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(x, baselineY - 56);
-    ctx.lineTo(x, baselineY + 24);
+    ctx.moveTo(x, baselineY - 44);
+    ctx.lineTo(x, baselineY + 16);
     ctx.stroke();
 
     ctx.fillStyle = '#ea580c';
     ctx.font = 'bold 16px Arial';
-    ctx.fillText('M' + (index + 1), x - 14, baselineY - 66);
+    ctx.fillText('M' + (index + 1), x - 14, baselineY - 50);
 
     ctx.fillStyle = dark ? '#f8fafc' : '#8a3f00';
     ctx.font = '15px Arial';
-    ctx.fillText(fmt(mark.position, common.rounding), x - 34, baselineY + 56);
+    ctx.fillText(fmt(mark.position, common.rounding), x - 34, baselineY + 38);
     ctx.font = '12px Arial';
-    ctx.fillText(referenceLabel(mark.referenceEnd), x - 18, baselineY + 76);
+    ctx.fillText(referenceLabel(mark.referenceEnd), x - 18, baselineY + 54);
 
     return { x: x, absolutePosition: safeAbsolute };
   });
@@ -2234,6 +2317,10 @@ function strokeMetallicConduit(ctx, points, dark) {
   ctx.restore();
 }
 
+function drawAngleCalloutNear(ctx, anchorX, anchorY, label, dx, dy, dark) {
+  drawAngleCallout(ctx, anchorX, anchorY, label, anchorX + dx, anchorY + dy, dark);
+}
+
 function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, common, dark) {
   const xs = plottedMarks.map(function (mark) { return mark.x; }).sort(function (a, b) { return a - b; });
   const firstX = xs[0] || padding + 120;
@@ -2243,27 +2330,27 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
 
   if (result.bendType === 'stub90') {
     const x = firstX;
-    const topY = baselineY - 132;
+    const topY = baselineY - 180;
     points = [{ x: padding, y: baselineY }, { x: x, y: baselineY }, { x: x, y: topY }];
     strokeMetallicConduit(ctx, points, dark);
     drawVerticalMeasure(ctx, Math.min(x + 46, width - padding + 10), topY, baselineY, 'Stub height ' + fmt(result.metrics.stubLength, common.rounding), dark);
-    drawAngleCallout(ctx, x, topY + 6, fmtAngle(90), clamp(x + 18, padding + 20, width - padding - 112), 78, dark);
+    drawAngleCalloutNear(ctx, x, topY + 6, fmtAngle(90), 18, -18, dark);
     return;
   }
 
   if (result.bendType === 'offset' && xs.length >= 2) {
-    const riseY = baselineY - 86;
+    const riseY = baselineY - 120;
     const runEnd = Math.min(xs[1] + 170, width - padding);
     points = [{ x: padding, y: baselineY }, { x: xs[0], y: baselineY }, { x: xs[1], y: riseY }, { x: runEnd, y: riseY }];
     strokeMetallicConduit(ctx, points, dark);
     drawVerticalMeasure(ctx, Math.min(runEnd - 12, width - padding - 6), riseY, baselineY, 'Offset height ' + fmt(result.metrics.offsetHeight, common.rounding), dark);
-    drawAngleCallout(ctx, xs[0] + 10, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 34, padding + 8, width - padding - 112), 78, dark);
-    drawAngleCallout(ctx, xs[1] - 8, riseY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 20, padding + 8, width - padding - 112), 118, dark);
+    drawAngleCalloutNear(ctx, xs[0] + 10, baselineY - 6, fmtAngle(result.angles[0]), -30, -50, dark);
+    drawAngleCalloutNear(ctx, xs[1] - 8, riseY - 8, fmtAngle(result.angles[1]), -26, -44, dark);
     return;
   }
 
   if (result.bendType === 'backToBack90' && xs.length >= 2) {
-    const topY = baselineY - 112;
+    const topY = baselineY - 150;
     points = [
       { x: padding, y: baselineY },
       { x: xs[0], y: baselineY },
@@ -2273,14 +2360,14 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
       { x: Math.min(xs[1] + 90, width - padding), y: baselineY }
     ];
     strokeMetallicConduit(ctx, points, dark);
-    drawAngleCallout(ctx, xs[0], topY + 8, '90°', clamp(xs[0] - 24, padding + 8, width - padding - 112), 84, dark);
-    drawAngleCallout(ctx, xs[1], topY + 8, '90°', clamp(xs[1] - 24, padding + 8, width - padding - 112), 84, dark);
-    drawHorizontalMeasure(ctx, xs[0], xs[1], topY - 28, result.metrics.distanceBetween90s ? 'Bend-to-bend ' + fmt(result.metrics.distanceBetween90s, common.rounding) : 'Center section', dark);
+    drawAngleCalloutNear(ctx, xs[0], topY + 8, '90°', -28, -44, dark);
+    drawAngleCalloutNear(ctx, xs[1], topY + 8, '90°', -28, -44, dark);
+    drawHorizontalMeasure(ctx, xs[0], xs[1], topY - 14, result.metrics.distanceBetween90s ? 'Bend-to-bend ' + fmt(result.metrics.distanceBetween90s, common.rounding) : 'Center section', dark);
     return;
   }
 
   if (result.bendType === 'saddle3' && xs.length >= 3) {
-    const peakY = baselineY - 84;
+    const peakY = baselineY - 126;
     points = [
       { x: padding, y: baselineY },
       { x: xs[0], y: baselineY },
@@ -2290,14 +2377,14 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
     ];
     strokeMetallicConduit(ctx, points, dark);
     drawVerticalMeasure(ctx, xs[1] + 52, peakY, baselineY, 'Saddle height ' + fmt(result.metrics.obstructionHeight, common.rounding), dark);
-    drawAngleCallout(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 34, padding + 8, width - padding - 112), 108, dark);
-    drawAngleCallout(ctx, xs[1], peakY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 24, padding + 8, width - padding - 112), 78, dark);
-    drawAngleCallout(ctx, xs[2] - 8, baselineY - 6, fmtAngle(result.angles[2]), clamp(xs[2] - 40, padding + 8, width - padding - 112), 108, dark);
+    drawAngleCalloutNear(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), -34, -48, dark);
+    drawAngleCalloutNear(ctx, xs[1], peakY - 8, fmtAngle(result.angles[1]), -26, -42, dark);
+    drawAngleCalloutNear(ctx, xs[2] - 8, baselineY - 6, fmtAngle(result.angles[2]), -34, -48, dark);
     return;
   }
 
   if (result.bendType === 'saddle4' && xs.length >= 4) {
-    const plateauY = baselineY - 76;
+    const plateauY = baselineY - 112;
     points = [
       { x: padding, y: baselineY },
       { x: xs[0], y: baselineY },
@@ -2308,20 +2395,38 @@ function drawSimplePath(ctx, result, plottedMarks, baselineY, padding, width, co
     ];
     strokeMetallicConduit(ctx, points, dark);
     drawVerticalMeasure(ctx, Math.min(xs[3] + 42, width - padding - 10), plateauY, baselineY, 'Offset height ' + fmt(result.metrics.obstructionHeight, common.rounding), dark);
-    drawAngleCallout(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), clamp(xs[0] - 36, padding + 8, width - padding - 112), 112, dark);
-    drawAngleCallout(ctx, xs[1], plateauY - 8, fmtAngle(result.angles[1]), clamp(xs[1] - 32, padding + 8, width - padding - 112), 78, dark);
-    drawAngleCallout(ctx, xs[2], plateauY - 8, fmtAngle(result.angles[2]), clamp(xs[2] - 16, padding + 8, width - padding - 112), 118, dark);
-    drawAngleCallout(ctx, xs[3] - 8, baselineY - 6, fmtAngle(result.angles[3]), clamp(xs[3] - 44, padding + 8, width - padding - 112), 112, dark);
+    drawAngleCalloutNear(ctx, xs[0] + 8, baselineY - 6, fmtAngle(result.angles[0]), -34, -50, dark);
+    drawAngleCalloutNear(ctx, xs[1], plateauY - 8, fmtAngle(result.angles[1]), -28, -44, dark);
+    drawAngleCalloutNear(ctx, xs[2], plateauY - 8, fmtAngle(result.angles[2]), -28, -44, dark);
+    drawAngleCalloutNear(ctx, xs[3] - 8, baselineY - 6, fmtAngle(result.angles[3]), -34, -50, dark);
     return;
   }
 
   if (result.bendType === 'kick' && xs.length >= 1) {
-    const riseY = baselineY - 82;
+    const riseY = baselineY - 118;
     const runEnd = Math.min(xs[0] + 170, width - padding);
     points = [{ x: padding, y: baselineY }, { x: xs[0], y: baselineY }, { x: runEnd, y: riseY }];
     strokeMetallicConduit(ctx, points, dark);
     drawVerticalMeasure(ctx, Math.min(runEnd - 12, width - padding - 6), riseY, baselineY, 'Rise ' + fmt(result.metrics.rise, common.rounding), dark);
-    drawAngleCallout(ctx, xs[0] + 18, baselineY - 8, fmtAngle(result.angles[0]), clamp(xs[0] - 18, padding + 8, width - padding - 112), 86, dark);
+    drawAngleCalloutNear(ctx, xs[0] + 18, baselineY - 8, fmtAngle(result.angles[0]), -16, -46, dark);
+    return;
+  }
+
+  if (result.bendType === 'segment90' && xs.length >= 2) {
+    const radiusHeight = Math.min(140, Math.max(72, (result.metrics.radius || 24) * 3));
+    const riseY = baselineY - radiusHeight;
+    const endX = Math.min(lastX + 120, width - padding);
+    points = [{ x: padding, y: baselineY }];
+    for (let i = 0; i < xs.length; i += 1) {
+      const t = xs.length > 1 ? i / (xs.length - 1) : 0;
+      const y = baselineY - (Math.sin(t * Math.PI / 2) * radiusHeight);
+      points.push({ x: xs[i], y: y });
+    }
+    points.push({ x: endX, y: riseY });
+    strokeMetallicConduit(ctx, points, dark);
+    drawVerticalMeasure(ctx, Math.min(endX + 24, width - padding + 6), riseY, baselineY, 'Radius ' + fmt(result.metrics.radius, common.rounding), dark);
+    drawHorizontalMeasure(ctx, xs[0], xs.length > 1 ? xs[1] : xs[0], riseY - 22, 'Spacing ' + fmt(result.metrics.spacingBetweenMarks, common.rounding), dark);
+    drawAngleCalloutNear(ctx, xs[0], baselineY - 2, fmtAngle(result.metrics.degreesPerBend), 8, -38, dark);
     return;
   }
 
@@ -2371,11 +2476,11 @@ function drawHorizontalMeasure(ctx, x1, x2, y, label, dark) {
   ctx.stroke();
 
   ctx.fillStyle = dark ? '#1f2937' : '#fff1e2';
-  ctx.fillRect(center - labelWidth / 2, y - 34, labelWidth, 24);
+  ctx.fillRect(center - labelWidth / 2, y - 28, labelWidth, 24);
   ctx.strokeStyle = dark ? 'rgba(255,255,255,0.14)' : '#f3c18e';
-  ctx.strokeRect(center - labelWidth / 2, y - 34, labelWidth, 24);
+  ctx.strokeRect(center - labelWidth / 2, y - 28, labelWidth, 24);
   ctx.fillStyle = dark ? '#f8fafc' : '#8a3f00';
-  ctx.fillText(label, center - labelWidth / 2 + 10, y - 17);
+  ctx.fillText(label, center - labelWidth / 2 + 10, y - 11);
 }
 
 function drawAngleCallout(ctx, anchorX, anchorY, label, boxX, boxY, dark) {
@@ -2383,8 +2488,10 @@ function drawAngleCallout(ctx, anchorX, anchorY, label, boxX, boxY, dark) {
   ctx.font = 'bold 13px Arial';
   const boxWidth = Math.max(ctx.measureText(label).width + 20, 54);
   const boxHeight = 26;
-  const targetX = boxX + boxWidth / 2;
-  const targetY = boxY + boxHeight;
+  const safeX = clamp(boxX, 8, ctx.canvas.width - boxWidth - 8);
+  const safeY = clamp(boxY, 8, ctx.canvas.height - boxHeight - 8);
+  const targetX = safeX + boxWidth / 2;
+  const targetY = safeY + boxHeight;
 
   ctx.setLineDash([4, 5]);
   ctx.strokeStyle = dark ? 'rgba(255,255,255,0.45)' : 'rgba(194, 65, 12, 0.7)';
@@ -2396,14 +2503,14 @@ function drawAngleCallout(ctx, anchorX, anchorY, label, boxX, boxY, dark) {
   ctx.setLineDash([]);
 
   ctx.fillStyle = dark ? '#1f2937' : '#fff7ed';
-  roundRect(ctx, boxX, boxY, boxWidth, boxHeight, 10);
+  roundRect(ctx, safeX, safeY, boxWidth, boxHeight, 10);
   ctx.fill();
   ctx.strokeStyle = '#fb923c';
   ctx.lineWidth = 1.25;
   ctx.stroke();
 
   ctx.fillStyle = dark ? '#f8fafc' : '#9a3412';
-  ctx.fillText(label, boxX + 10, boxY + 17);
+  ctx.fillText(label, safeX + 10, safeY + 17);
   ctx.restore();
 }
 

@@ -462,7 +462,7 @@ body[data-theme="dark"] .result-summary {
 #diagramCanvas {
   width: 100%;
   height: auto;
-  min-height: 520px;
+  min-height: 440px;
   margin-top: 14px;
   background: linear-gradient(180deg, #fffefe, #fff8f2);
   border-radius: 24px;
@@ -644,6 +644,40 @@ body[data-theme="dark"] .slider-field .slider-top strong {
   box-shadow: 0 8px 16px rgba(15,23,42,0.14);
 }
 
+.slider-control-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  gap: 12px;
+  align-items: center;
+}
+
+.slider-nudge-btn {
+  min-height: 48px;
+  width: 48px;
+  padding: 0;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.86);
+  border: 1px solid rgba(148,163,184,0.18);
+  color: var(--accent-deep);
+  box-shadow: var(--shadow-soft);
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+body[data-theme="dark"] .slider-nudge-btn {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.08);
+  color: #ffbe88;
+}
+
+.slider-nudge-btn:hover {
+  transform: translateY(-1px);
+}
+
+.slider-nudge-btn:active {
+  transform: translateY(0);
+}
+
 .slider-minmax {
   display: flex;
   justify-content: space-between;
@@ -711,7 +745,7 @@ body[data-view-mode="desktop"] .result-panel {
 }
 
 body[data-view-mode="desktop"] #diagramCanvas {
-  min-height: 520px;
+  min-height: 440px;
 }
 
 body[data-view-mode="mobile"] .app-header,
@@ -778,7 +812,7 @@ body[data-view-mode="mobile"] .result-summary {
 body[data-view-mode="mobile"] #diagramCanvas {
   min-height: 0;
   aspect-ratio: 9 / 14;
-  max-height: 560px;
+  max-height: 520px;
 }
 
 body[data-view-mode="mobile"] .subtitle {
@@ -834,7 +868,7 @@ body[data-view-mode="mobile"] .kv {
 
 @media (max-width: 720px) {
   .bend-type-grid, .field-inline-grid, .grid.two { grid-template-columns: 1fr; }
-  #diagramCanvas { min-height: 360px; }
+  #diagramCanvas { min-height: 300px; }
 }
 
 @media print {
