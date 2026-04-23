@@ -1535,7 +1535,7 @@ function renderDynamicFields() {
       '<h3>90° stub-up inputs</h3>',
       '<p class="inline-note prominent">Set the finished stub length from ' + escapeHtml(selectedReference) + '.</p>',
       '<div class="dynamic-stack">',
-      sliderFieldHtml('stubLength', 'Stub height from ' + selectedReference, { min: 0, max: 120, value: saved.stubLength || 24 }),
+      sliderFieldHtml('stubLength', 'First Bend @', { min: 0, max: 120, value: saved.stubLength || 24 }),
       '</div>'
     ].join(''),
 
@@ -1543,7 +1543,7 @@ function renderDynamicFields() {
       '<h3>Offset / rolling offset inputs</h3>',
       '<p class="inline-note prominent">Use the sliders for object location and height. Tap a bend-angle button instead of a dropdown.</p>',
       '<div class="dynamic-stack">',
-      sliderFieldHtml('offsetReferenceDistance', 'Distance to object / start point from ' + selectedReference, { min: 0, max: 120, value: saved.offsetReferenceDistance || 24 }),
+      sliderFieldHtml('offsetReferenceDistance', 'First Bend @', { min: 0, max: 120, value: saved.offsetReferenceDistance || 24 }),
       sliderFieldHtml('offsetHeight', 'Offset height', { min: 0, max: 36, value: saved.offsetHeight || 6 }),
       angleButtonsHtml('offsetAnglePreset', 'Angle of bends', saved.offsetAnglePreset || 30, [10, 15, 22.5, 30, 45, 60], true),
       '<div class="hint-card"><strong>Offset note:</strong> spacing uses universal geometry; profile data still controls take-up, radius, and ITool B2 values.</div>',
